@@ -12,7 +12,7 @@
 
 #include "./imageio_util.h"
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__OS2__)
 #include <fcntl.h>   // for _O_BINARY
 #include <io.h>      // for _setmode()
 #endif
@@ -24,8 +24,12 @@
 // File I/O
 
 FILE* ImgIoUtilSetBinaryMode(FILE* file) {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__OS2__)
+#if defined(__OS2__)
+  if (setmode(fileno(file), O_BINARY) == -1) {
+#else
   if (_setmode(_fileno(file), _O_BINARY) == -1) {
+#endif
     fprintf(stderr, "Failed to reopen file in O_BINARY mode.\n");
     return NULL;
   }
