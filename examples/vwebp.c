@@ -11,11 +11,15 @@
 //
 // Author: Skal (pascal.massimino@gmail.com)
 #ifdef HAVE_CONFIG_H
-#include "webp/config.h"
+#include "src/webp/config.h"
 #endif
 
 #if defined(__unix__) || defined(__CYGWIN__)
 #define _POSIX_C_SOURCE 200112L  // for setenv
+#endif
+
+#ifdef BUILD_MONOLITHIC
+#include "extras/tools.h"
 #endif
 
 #include <stdio.h>

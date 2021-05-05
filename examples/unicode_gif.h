@@ -16,7 +16,7 @@
 
 #include "./unicode.h"
 #ifdef HAVE_CONFIG_H
-#include "webp/config.h"  // For WEBP_HAVE_GIF
+#include "src/webp/config.h"  // For WEBP_HAVE_GIF
 #endif
 
 #if defined(WEBP_HAVE_GIF)

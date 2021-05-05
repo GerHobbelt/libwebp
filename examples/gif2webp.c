@@ -18,7 +18,11 @@
 #include <string.h>
 
 #ifdef HAVE_CONFIG_H
-#include "webp/config.h"
+#include "src/webp/config.h"
+#endif
+
+#ifdef BUILD_MONOLITHIC
+#include "extras/tools.h"
 #endif
 
 #ifdef WEBP_HAVE_GIF

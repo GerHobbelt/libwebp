@@ -17,7 +17,11 @@
 #include <string.h>
 
 #ifdef HAVE_CONFIG_H
-#include "webp/config.h"
+#include "src/webp/config.h"
+#endif
+
+#ifdef BUILD_MONOLITHIC
+#include "extras/tools.h"
 #endif
 
 #include "../examples/example_util.h"
@@ -178,7 +182,7 @@ static uint8_t* AllocateExternalBuffer(WebPDecoderConfig* config,
 }
 
 #ifdef BUILD_MONOLITHIC
-int cwebp_main(int argc, const char* argv[])
+int dwebp_main(int argc, const char* argv[])
 #else
 int main(int argc, const char* argv[])
 #endif

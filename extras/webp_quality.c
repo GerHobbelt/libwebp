@@ -16,6 +16,10 @@
 #include "../examples/unicode.h"
 
 #ifdef BUILD_MONOLITHIC
+#include "extras/tools.h"
+#endif
+
+#ifdef BUILD_MONOLITHIC
 int webp_quality_main(int argc, const char* argv[])
 #else
 int main(int argc, const char* argv[])

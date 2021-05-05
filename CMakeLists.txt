@@ -435,7 +435,7 @@ if(WEBP_BUILD_ANIM_UTILS
                       imagedec
                       imageenc
                PROPERTY INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/src
-                        ${CMAKE_CURRENT_BINARY_DIR}/src)
+                        ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
 if(WEBP_BUILD_DWEBP)
@@ -443,7 +443,7 @@ if(WEBP_BUILD_DWEBP)
   parse_makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/examples "DWEBP_SRCS" "dwebp")
   add_executable(dwebp ${DWEBP_SRCS})
   target_link_libraries(dwebp exampleutil imagedec imageenc)
-  target_include_directories(dwebp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  target_include_directories(dwebp PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
   install(TARGETS dwebp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -452,7 +452,7 @@ if(WEBP_BUILD_CWEBP)
   parse_makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/examples "CWEBP_SRCS" "cwebp")
   add_executable(cwebp ${CWEBP_SRCS})
   target_link_libraries(cwebp exampleutil imagedec webp)
-  target_include_directories(cwebp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  target_include_directories(cwebp PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
   install(TARGETS cwebp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -486,7 +486,7 @@ if(WEBP_BUILD_GIF2WEBP)
                         webp
                         libwebpmux
                         ${WEBP_DEP_GIF_LIBRARIES})
-  target_include_directories(gif2webp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  target_include_directories(gif2webp PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
   install(TARGETS gif2webp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -502,7 +502,7 @@ if(WEBP_BUILD_IMG2WEBP)
                         imageioutil
                         webp
                         libwebpmux)
-  target_include_directories(img2webp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  target_include_directories(img2webp PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
   install(TARGETS img2webp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -522,7 +522,7 @@ if(WEBP_BUILD_VWEBP)
                           webpdemux)
     target_include_directories(vwebp
                                PRIVATE ${GLUT_INCLUDE_DIR}
-                                       ${CMAKE_CURRENT_BINARY_DIR}/src
+                                       ${CMAKE_CURRENT_BINARY_DIR}
                                        ${OPENGL_INCLUDE_DIR})
     install(TARGETS vwebp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     if(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
@@ -541,7 +541,7 @@ if(WEBP_BUILD_WEBPINFO)
                     "webpinfo")
   add_executable(webpinfo ${WEBPINFO_SRCS})
   target_link_libraries(webpinfo exampleutil imageioutil)
-  target_include_directories(webpinfo PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  target_include_directories(webpinfo PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
   install(TARGETS webpinfo RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -551,7 +551,7 @@ if(WEBP_BUILD_WEBPMUX)
                     "webpmux")
   add_executable(webpmux ${WEBPMUX_SRCS})
   target_link_libraries(webpmux exampleutil imageioutil libwebpmux webp)
-  target_include_directories(webpmux PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  target_include_directories(webpmux PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
   install(TARGETS webpmux RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -568,7 +568,7 @@ if(WEBP_BUILD_EXTRAS)
   target_include_directories(get_disto
                              PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                                      ${CMAKE_CURRENT_SOURCE_DIR}/src
-                                     ${CMAKE_CURRENT_BINARY_DIR}/src)
+                                     ${CMAKE_CURRENT_BINARY_DIR})
 
   # webp_quality
   add_executable(webp_quality ${WEBP_QUALITY_SRCS} ${WEBP_EXTRAS_SRCS})
@@ -586,7 +586,6 @@ if(WEBP_BUILD_EXTRAS)
                                PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                                        ${CMAKE_CURRENT_SOURCE_DIR}/src
                                        ${CMAKE_CURRENT_BINARY_DIR}
-                                       ${CMAKE_CURRENT_BINARY_DIR}/src
                                        ${SDL_INCLUDE_DIR})
     set(WEBP_HAVE_SDL 1)
     target_compile_definitions(vwebp_sdl PUBLIC WEBP_HAVE_SDL)
@@ -639,7 +638,7 @@ if(WEBP_BUILD_ANIM_UTILS)
                         libwebpmux
                         webpdemux
                         ${WEBP_DEP_GIF_LIBRARIES})
-  target_include_directories(anim_diff PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  target_include_directories(anim_diff PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
   # anim_dump
   include_directories(${WEBP_DEP_IMG_INCLUDE_DIRS} ${WEBP_DEP_GIF_INCLUDE_DIRS})
@@ -655,7 +654,7 @@ if(WEBP_BUILD_ANIM_UTILS)
                         libwebpmux
                         webpdemux
                         ${WEBP_DEP_GIF_LIBRARIES})
-  target_include_directories(anim_dump PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  target_include_directories(anim_dump PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
 # Install the different headers and libraries.

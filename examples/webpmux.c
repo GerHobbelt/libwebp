@@ -52,7 +52,11 @@
 */
 
 #ifdef HAVE_CONFIG_H
-#include "webp/config.h"
+#include "src/webp/config.h"
+#endif
+
+#ifdef BUILD_MONOLITHIC
+#include "extras/tools.h"
 #endif
 
 #include <assert.h>

@@ -71,21 +71,7 @@ WEBP_EXTERN int VP8EstimateQuality(const uint8_t* const data, size_t size);
 //------------------------------------------------------------------------------
 
 #ifdef BUILD_MONOLITHIC
-WEBP_EXTERN int webp_anim_diff_main(int argc, const char* argv[]);
-WEBP_EXTERN int webp_anim_dump_main(int argc, const char* argv[]);
-WEBP_EXTERN int cwebp_main(int argc, const char* argv[]);
-WEBP_EXTERN int cwebp_main(int argc, const char* argv[]);
-WEBP_EXTERN int gif2webp_main(int argc, const char* argv[]);
-WEBP_EXTERN int gif2webp_main(int argc, const char* argv[]);
-WEBP_EXTERN int img2webp_main(int argc, const char* argv[]);
-WEBP_EXTERN int vwebp_main(int argc, const char* argv[]);
-WEBP_EXTERN int vwebp_main(int argc, const char* argv[]);
-WEBP_EXTERN int webpinfo_main(int argc, const char* argv[]);
-WEBP_EXTERN int webpmux_main(int argc, const char* argv[]);
-WEBP_EXTERN int webp_get_disto_main(int argc, const char* argv[]);
-WEBP_EXTERN int vwebp_sdl_main(int argc, const char* argv[]);
-WEBP_EXTERN int vwebp_sdl_main(int argc, const char* argv[]);
-WEBP_EXTERN int webp_quality_main(int argc, const char* argv[]);
+#include "extras/tools.h"
 #endif
 
 #ifdef __cplusplus

@@ -28,6 +28,10 @@
 #include "imageio/imageio_util.h"
 #include "../examples/unicode.h"
 
+#ifdef BUILD_MONOLITHIC
+#include "extras/tools.h"
+#endif
+
 static size_t ReadPicture(const char* const filename, WebPPicture* const pic,
                           int keep_alpha) {
   const uint8_t* data = NULL;
