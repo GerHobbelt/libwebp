@@ -1114,7 +1114,12 @@ static void HelpLong(void) {
          "  -bitstream_info .... Parse bitstream header.\n");
 }
 
-int main(int argc, const char* argv[]) {
+#ifdef BUILD_MONOLITHIC
+int webpinfo_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
   int c, quiet = 0, show_diag = 0, show_summary = 0;
   int parse_bitstream = 0;
   WebPInfoStatus webp_info_status = WEBP_INFO_OK;

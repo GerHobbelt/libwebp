@@ -49,7 +49,12 @@ static void ProcessEvents(void) {
   }
 }
 
-int main(int argc, char* argv[]) {
+#ifdef BUILD_MONOLITHIC
+int vwebp_sdl_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
   int c;
   int ok = 0;
 
@@ -92,7 +97,12 @@ int main(int argc, char* argv[]) {
 
 #else  // !WEBP_HAVE_SDL
 
-int main(int argc, const char* argv[]) {
+#ifdef BUILD_MONOLITHIC
+int vwebp_sdl_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
   fprintf(stderr, "SDL support not enabled in %s.\n", argv[0]);
   (void)argc;
   return 0;

@@ -96,7 +96,12 @@ static void Help(void) {
 
 //------------------------------------------------------------------------------
 
-int main(int argc, const char* argv[]) {
+#ifdef BUILD_MONOLITHIC
+int gif2webp_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
   int verbose = 0;
   int gif_error = GIF_ERROR;
   WebPMuxError err = WEBP_MUX_OK;
@@ -595,7 +600,12 @@ int main(int argc, const char* argv[]) {
 
 #else  // !WEBP_HAVE_GIF
 
-int main(int argc, const char* argv[]) {
+#ifdef BUILD_MONOLITHIC
+int gif2webp_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
   fprintf(stderr, "GIF support not enabled in %s.\n", argv[0]);
   (void)argc;
   return 0;

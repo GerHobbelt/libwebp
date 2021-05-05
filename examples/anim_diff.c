@@ -206,7 +206,12 @@ static void Help(void) {
   printf("  -version ............ print version number and exit\n");
 }
 
-int main(int argc, const char* argv[]) {
+#ifdef BUILD_MONOLITHIC
+int webp_anim_diff_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
   int return_code = -1;
   int dump_frames = 0;
   const char* dump_folder = NULL;

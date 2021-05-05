@@ -646,8 +646,13 @@ static const char* const kErrorMessages[VP8_ENC_ERROR_LAST] = {
 
 //------------------------------------------------------------------------------
 
-int main(int argc, const char* argv[]) {
-  int return_value = -1;
+#ifdef BUILD_MONOLITHIC
+int cwebp_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
+	int return_value = -1;
   const char* in_file = NULL, *out_file = NULL, *dump_file = NULL;
   FILE* out = NULL;
   int c;

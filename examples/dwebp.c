@@ -177,8 +177,13 @@ static uint8_t* AllocateExternalBuffer(WebPDecoderConfig* config,
   return external_buffer;
 }
 
-int main(int argc, const char* argv[]) {
-  int ok = 0;
+#ifdef BUILD_MONOLITHIC
+int cwebp_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
+	int ok = 0;
   const char* in_file = NULL;
   const char* out_file = NULL;
 

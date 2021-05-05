@@ -123,7 +123,12 @@ static int SetLoopCount(int loop_count, WebPData* const webp_data) {
 
 //------------------------------------------------------------------------------
 
-int main(int argc, const char* argv[]) {
+#ifdef BUILD_MONOLITHIC
+int img2webp_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
   const char* output = NULL;
   WebPAnimEncoder* enc = NULL;
   int verbose = 0;

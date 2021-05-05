@@ -15,7 +15,12 @@
 #include "imageio/imageio_util.h"
 #include "../examples/unicode.h"
 
-int main(int argc, const char* argv[]) {
+#ifdef BUILD_MONOLITHIC
+int webp_quality_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
   int c;
   int quiet = 0;
   int ok = 1;

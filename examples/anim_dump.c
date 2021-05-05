@@ -35,8 +35,13 @@ static void Help(void) {
   printf("  -version ............ print version number and exit\n");
 }
 
-int main(int argc, const char* argv[]) {
-  int error = 0;
+#ifdef BUILD_MONOLITHIC
+int webp_anim_dump_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
+	int error = 0;
   const W_CHAR* dump_folder = TO_W_CHAR(".");
   const W_CHAR* prefix = TO_W_CHAR("dump_");
   const W_CHAR* suffix = TO_W_CHAR("png");

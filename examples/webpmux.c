@@ -1181,7 +1181,12 @@ static int Process(const Config* config) {
 //------------------------------------------------------------------------------
 // Main.
 
-int main(int argc, const char* argv[]) {
+#ifdef BUILD_MONOLITHIC
+int webpmux_main(int argc, const char* argv[])
+#else
+int main(int argc, const char* argv[])
+#endif
+{
   Config config;
   int ok;
 
