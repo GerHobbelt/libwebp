@@ -102,7 +102,7 @@ static VP8StatusCode AllocateBuffer(WebPDecBuffer* const buffer) {
     int stride;
     uint64_t size;
 
-    if ((uint64_t)w * kModeBpp[mode] >= (1ull << 32)) {
+    if ((uint64_t)w * kModeBpp[mode] >= (1ull << 31)) {
       return VP8_STATUS_INVALID_PARAM;
     }
     stride = w * kModeBpp[mode];
@@ -155,11 +155,11 @@ VP8StatusCode WebPFlipBuffer(WebPDecBuffer* const buffer) {
   }
   if (WebPIsRGBMode(buffer->colorspace)) {
     WebPRGBABuffer* const buf = &buffer->u.RGBA;
-    buf->rgba += (buffer->height - 1) * buf->stride;
+    buf->rgba += (int64_t)(buffer->height - 1) * buf->stride;
     buf->stride = -buf->stride;
   } else {
     WebPYUVABuffer* const buf = &buffer->u.YUVA;
-    const int H = buffer->height;
+    const int64_t H = buffer->height;
     buf->y += (H - 1) * buf->y_stride;
     buf->y_stride = -buf->y_stride;
     buf->u += ((H - 1) >> 1) * buf->u_stride;
