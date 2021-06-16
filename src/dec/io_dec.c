@@ -298,7 +298,8 @@ static int InitYUVRescaler(const VP8Io* const io, WebPDecParams* const p) {
   const int uv_out_height = (out_height + 1) >> 1;
   const int uv_in_width  = (io->mb_w + 1) >> 1;
   const int uv_in_height = (io->mb_h + 1) >> 1;
-  const size_t work_size = 2 * out_width;   // scratch memory for luma rescaler
+  // scratch memory for luma rescaler
+  const size_t work_size = 2 * (size_t)out_width;
   const size_t uv_work_size = 2 * uv_out_width;  // and for each u/v ones
   uint64_t total_size;
   size_t rescaler_size;
@@ -312,7 +313,7 @@ static int InitYUVRescaler(const VP8Io* const io, WebPDecParams* const p) {
   }
   rescaler_size = num_rescalers * sizeof(*p->scaler_y) + WEBP_ALIGN_CST;
   total_size += rescaler_size;
-  if (total_size != (size_t)total_size) {
+  if (!CheckSizeOverflow(total_size)) {
     return 0;
   }
 
@@ -486,7 +487,8 @@ static int InitRGBRescaler(const VP8Io* const io, WebPDecParams* const p) {
   const int out_height = io->scaled_height;
   const int uv_in_width  = (io->mb_w + 1) >> 1;
   const int uv_in_height = (io->mb_h + 1) >> 1;
-  const size_t work_size = 2 * out_width;   // scratch memory for one rescaler
+  // scratch memory for one rescaler
+  const size_t work_size = 2 * (size_t)out_width;
   rescaler_t* work;  // rescalers work area
   uint8_t* tmp;   // tmp storage for scaled YUV444 samples before RGB conversion
   uint64_t tmp_size1, tmp_size2, total_size;
@@ -499,7 +501,7 @@ static int InitRGBRescaler(const VP8Io* const io, WebPDecParams* const p) {
   total_size = tmp_size1 * sizeof(*work) + tmp_size2 * sizeof(*tmp);
   rescaler_size = num_rescalers * sizeof(*p->scaler_y) + WEBP_ALIGN_CST;
   total_size += rescaler_size;
-  if (total_size != (size_t)total_size) {
+  if (!CheckSizeOverflow(total_size)) {
     return 0;
   }
 
