@@ -11,6 +11,8 @@
 #ifndef WEBP_EXTRAS_TOOLS_H_
 #define WEBP_EXTRAS_TOOLS_H_
 
+#if defined(BUILD_MONOLITHIC)
+
 #include "../src/webp/types.h"
 
 #ifdef __cplusplus
@@ -34,6 +36,8 @@ WEBP_EXTERN int webp_quality_main(int argc, const char* argv[]);
 
 #ifdef __cplusplus
 }    // extern "C"
+#endif
+
 #endif
 
 #endif  // WEBP_EXTRAS_EXTRAS_H_
