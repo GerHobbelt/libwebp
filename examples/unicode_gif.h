@@ -44,7 +44,7 @@ static GifFileType* DGifOpenFileUnicode(const W_CHAR* file_name, int* error) {
 #endif
   }
 
-#if defined(_WIN32) && defined(_UNICODE)
+#if defined(_WIN32) && defined(_UNICODE) && !defined(BUILD_MONOLITHIC)
 
   int file_handle = _wopen(file_name, _O_RDONLY | _O_BINARY);
   if (file_handle == -1) {
