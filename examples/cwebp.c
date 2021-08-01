@@ -656,7 +656,7 @@ int cwebp_main(int argc, const char* argv[])
 int main(int argc, const char* argv[])
 #endif
 {
-	int return_value = -1;
+  int return_value = -1;
   const char* in_file = NULL, *out_file = NULL, *dump_file = NULL;
   FILE* out = NULL;
   int c;

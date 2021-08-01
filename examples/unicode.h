@@ -16,7 +16,7 @@
 #ifndef WEBP_EXAMPLES_UNICODE_H_
 #define WEBP_EXAMPLES_UNICODE_H_
 
-#if defined(_WIN32) && defined(_UNICODE)
+#if defined(_WIN32) && defined(_UNICODE) && !defined(BUILD_MONOLITHIC)
 
 // wchar_t is used instead of TCHAR because we only perform additional work when
 // Unicode is enabled and because the output of CommandLineToArgvW() is wchar_t.
