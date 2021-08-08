@@ -96,8 +96,7 @@ int ExUtilInitCommandLineArguments(int argc, const char* argv[],
             "Error: Reading arguments from a file is a feature unavailable "
             "with Unicode binaries.\n");
     return 0;
-#endif
-
+#else
     if (!ExUtilReadFileToWebPData(argv[0], &args->argv_data_)) {
       return 0;
     }
@@ -117,6 +116,7 @@ int ExUtilInitCommandLineArguments(int argc, const char* argv[],
       args->argv_[argc++] = cur;
     }
     args->argc_ = argc;
+#endif
   }
   return 1;
 }
