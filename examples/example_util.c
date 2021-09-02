@@ -88,8 +88,6 @@ int ExUtilInitCommandLineArguments(int argc, const char* argv[],
   if (args == NULL || argv == NULL) return 0;
   ResetCommandLineArguments(argc, argv, args);
   if (argc == 1 && argv[0][0] != '-') {
-    char* cur;
-    const char sep[] = " \t\r\n\f\v";
 
 #if defined(_WIN32) && defined(_UNICODE)
     fprintf(stderr,
@@ -97,7 +95,10 @@ int ExUtilInitCommandLineArguments(int argc, const char* argv[],
             "with Unicode binaries.\n");
     return 0;
 #else
-    if (!ExUtilReadFileToWebPData(argv[0], &args->argv_data_)) {
+	char* cur;
+	const char sep[] = " \t\r\n\f\v";
+
+	if (!ExUtilReadFileToWebPData(argv[0], &args->argv_data_)) {
       return 0;
     }
     args->own_argv_ = 1;
