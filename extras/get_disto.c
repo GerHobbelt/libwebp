@@ -231,9 +231,9 @@ static void Help(void) {
 }
 
 #ifdef BUILD_MONOLITHIC
-int webp_get_disto_main(int argc, const char* argv[])
+int webp_get_disto_main(int argc, const char** argv)
 #else
-int main(int argc, const char* argv[])
+int main(int argc, const char** argv)
 #endif
 {
   WebPPicture pic1, pic2;

@@ -20,9 +20,9 @@
 #endif
 
 #ifdef BUILD_MONOLITHIC
-int webp_quality_main(int argc, const char* argv[])
+int webp_quality_main(int argc, const char** argv)
 #else
-int main(int argc, const char* argv[])
+int main(int argc, const char** argv)
 #endif
 {
   int c;

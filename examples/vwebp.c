@@ -484,9 +484,9 @@ static void Help(void) {
 }
 
 #ifdef BUILD_MONOLITHIC
-int vwebp_main(int argc, const char* argv[])
+int vwebp_main(int argc, const char** argv)
 #else
-int main(int argc, const char* argv[])
+int main(int argc, const char** argv)
 #endif
 {
   int c;
@@ -640,9 +640,9 @@ int main(int argc, const char* argv[])
 #else   // !WEBP_HAVE_GL
 
 #ifdef BUILD_MONOLITHIC
-int vwebp_main(int argc, const char* argv[])
+int vwebp_main(int argc, const char** argv)
 #else
-int main(int argc, const char* argv[])
+int main(int argc, const char** argv)
 #endif
 {
   fprintf(stderr, "OpenGL support not enabled in %s.\n", argv[0]);

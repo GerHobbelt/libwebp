@@ -182,9 +182,9 @@ static uint8_t* AllocateExternalBuffer(WebPDecoderConfig* config,
 }
 
 #ifdef BUILD_MONOLITHIC
-int dwebp_main(int argc, const char* argv[])
+int dwebp_main(int argc, const char** argv)
 #else
-int main(int argc, const char* argv[])
+int main(int argc, const char** argv)
 #endif
 {
 	int ok = 0;

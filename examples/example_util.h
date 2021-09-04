@@ -57,7 +57,7 @@ typedef struct {
 // arguments. The content of 'args' is overwritten.
 // Returns false in case of error (memory allocation failure, non
 // existing file, too many arguments, ...).
-int ExUtilInitCommandLineArguments(int argc, const char* argv[],
+int ExUtilInitCommandLineArguments(int argc, const char** argv,
                                    CommandLineArguments* const args);
 
 // Deallocate all memory and reset 'args'.

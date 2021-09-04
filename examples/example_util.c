@@ -63,7 +63,7 @@ float ExUtilGetFloat(const char* const v, int* const error) {
 
 //------------------------------------------------------------------------------
 
-static void ResetCommandLineArguments(int argc, const char* argv[],
+static void ResetCommandLineArguments(int argc, const char** argv,
                                       CommandLineArguments* const args) {
   assert(args != NULL);
   args->argc_ = argc;
@@ -83,7 +83,7 @@ void ExUtilDeleteCommandLineArguments(CommandLineArguments* const args) {
 }
 
 #define MAX_ARGC 16384
-int ExUtilInitCommandLineArguments(int argc, const char* argv[],
+int ExUtilInitCommandLineArguments(int argc, const char** argv,
                                    CommandLineArguments* const args) {
   if (args == NULL || argv == NULL) return 0;
   ResetCommandLineArguments(argc, argv, args);

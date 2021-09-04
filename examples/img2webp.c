@@ -128,9 +128,9 @@ static int SetLoopCount(int loop_count, WebPData* const webp_data) {
 //------------------------------------------------------------------------------
 
 #ifdef BUILD_MONOLITHIC
-int img2webp_main(int argc, const char* argv[])
+int img2webp_main(int argc, const char** argv)
 #else
-int main(int argc, const char* argv[])
+int main(int argc, const char** argv)
 #endif
 {
   const char* output = NULL;

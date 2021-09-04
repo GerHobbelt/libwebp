@@ -651,9 +651,9 @@ static const char* const kErrorMessages[VP8_ENC_ERROR_LAST] = {
 //------------------------------------------------------------------------------
 
 #ifdef BUILD_MONOLITHIC
-int cwebp_main(int argc, const char* argv[])
+int cwebp_main(int argc, const char** argv)
 #else
-int main(int argc, const char* argv[])
+int main(int argc, const char** argv)
 #endif
 {
   int return_value = -1;

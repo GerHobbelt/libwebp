@@ -830,7 +830,7 @@ static int ValidateConfig(Config* const config) {
 }
 
 // Create config object from command-line arguments.
-static int InitializeConfig(int argc, const char* argv[], Config* const config,
+static int InitializeConfig(int argc, const char** argv, Config* const config,
                             const W_CHAR** const unicode_argv) {
   int num_feature_args = 0;
   int ok;
@@ -1186,9 +1186,9 @@ static int Process(const Config* config) {
 // Main.
 
 #ifdef BUILD_MONOLITHIC
-int webpmux_main(int argc, const char* argv[])
+int webpmux_main(int argc, const char** argv)
 #else
-int main(int argc, const char* argv[])
+int main(int argc, const char** argv)
 #endif
 {
   Config config;

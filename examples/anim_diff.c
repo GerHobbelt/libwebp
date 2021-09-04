@@ -211,9 +211,9 @@ static void Help(void) {
 }
 
 #ifdef BUILD_MONOLITHIC
-int webp_anim_diff_main(int argc, const char* argv[])
+int webp_anim_diff_main(int argc, const char** argv)
 #else
-int main(int argc, const char* argv[])
+int main(int argc, const char** argv)
 #endif
 {
   int return_code = -1;

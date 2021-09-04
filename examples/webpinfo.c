@@ -1119,9 +1119,9 @@ static void HelpLong(void) {
 }
 
 #ifdef BUILD_MONOLITHIC
-int webpinfo_main(int argc, const char* argv[])
+int webpinfo_main(int argc, const char** argv)
 #else
-int main(int argc, const char* argv[])
+int main(int argc, const char** argv)
 #endif
 {
   int c, quiet = 0, show_diag = 0, show_summary = 0;
