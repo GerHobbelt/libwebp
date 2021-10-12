@@ -34,78 +34,150 @@ details on the presubmit API built into depot_tools.
 """
 
 import subprocess2
+
 USE_PYTHON3 = True
+_BASH_INDENTATION = "2"
+_INCLUDE_BASH_FILES_ONLY = [r".*\.sh$"]
 _INCLUDE_MAN_FILES_ONLY = [r"man/.+\.1$"]
 _LIBWEBP_MAX_LINE_LENGTH = 80
 
 
+def _GetFilesToSkip(input_api):
+  return list(input_api.DEFAULT_FILES_TO_SKIP) + [
+      r"swig/.*\.py$",
+      r"\.pylintrc$",
+  ]
+
+
 def _RunManCmd(input_api, output_api, man_file):
-    """man command wrapper."""
-    cmd = ["man", "--warnings", "-EUTF-8", "-l", "-Tutf8", "-Z", man_file]
-    name = "Check %s file." % man_file
-    start = input_api.time.time()
-    output, _ = subprocess2.communicate(cmd,
-                                        stdout=None,
-                                        stderr=subprocess2.PIPE,
-                                        universal_newlines=True)
-    duration = input_api.time.time() - start
-    if output[1]:
-        return output_api.PresubmitError(
-            "%s\n%s (%4.2fs) failed\n%s" %
-            (name, " ".join(cmd), duration, output[1]))
+  """man command wrapper."""
+  cmd = ["man", "--warnings", "-EUTF-8", "-l", "-Tutf8", "-Z", man_file]
+  name = "Check %s file." % man_file
+  start = input_api.time.time()
+  output, _ = subprocess2.communicate(
+      cmd, stdout=None, stderr=subprocess2.PIPE, universal_newlines=True)
+  duration = input_api.time.time() - start
+  if output[1]:
+    return output_api.PresubmitError("%s\n%s (%4.2fs) failed\n%s" %
+                                     (name, " ".join(cmd), duration, output[1]))
+  return output_api.PresubmitResult("%s\n%s (%4.2fs)\n" %
+                                    (name, " ".join(cmd), duration))
+
+
+def _RunShellCheckCmd(input_api, output_api, bash_file):
+  """shellcheck command wrapper."""
+  cmd = ["shellcheck", "-x", "-oall", "-sbash", bash_file]
+  name = "Check %s file." % bash_file
+  start = input_api.time.time()
+  output, rc = subprocess2.communicate(
+      cmd, stdout=None, stderr=subprocess2.PIPE, universal_newlines=True)
+  duration = input_api.time.time() - start
+  if rc == 0:
     return output_api.PresubmitResult("%s\n%s (%4.2fs)\n" %
                                       (name, " ".join(cmd), duration))
+  return output_api.PresubmitError("%s\n%s (%4.2fs) failed\n%s" %
+                                   (name, " ".join(cmd), duration, output[1]))
 
 
-def _CheckManFiles(input_api, output_api):
-    """Makes sure that libwebp/ man files are clean."""
+def _RunShfmtCheckCmd(input_api, output_api, bash_file):
+  """shfmt command wrapper."""
+  cmd = [
+      "shfmt", "-i", _BASH_INDENTATION, "-bn", "-ci", "-sr", "-kp", "-d",
+      bash_file
+  ]
+  name = "Check %s file." % bash_file
+  start = input_api.time.time()
+  output, rc = subprocess2.communicate(
+      cmd, stdout=None, stderr=subprocess2.PIPE, universal_newlines=True)
+  duration = input_api.time.time() - start
+  if rc == 0:
+    return output_api.PresubmitResult("%s\n%s (%4.2fs)\n" %
+                                      (name, " ".join(cmd), duration))
+  return output_api.PresubmitError("%s\n%s (%4.2fs) failed\n%s" %
+                                   (name, " ".join(cmd), duration, output[1]))
 
-    man_sources = lambda x: input_api.FilterSourceFile(
-        x, files_to_check=_INCLUDE_MAN_FILES_ONLY, files_to_skip=None)
 
-    affected_man_files = input_api.change.AffectedFiles(
-        file_filter=man_sources)
-    results = [
-        _RunManCmd(input_api, output_api, man_file.AbsoluteLocalPath())
-        for man_file in affected_man_files
-    ]
-    return results
+def _RunCmdOnCheckedFiles(input_api, output_api, run_cmd, files_to_check):
+  """Ensure that libwebp/ files are clean."""
+  file_filter = lambda x: input_api.FilterSourceFile(
+      x, files_to_check=files_to_check, files_to_skip=None)
+
+  affected_files = input_api.change.AffectedFiles(file_filter=file_filter)
+  results = [
+      run_cmd(input_api, output_api, f.AbsoluteLocalPath())
+      for f in affected_files
+  ]
+  return results
 
 
 def _CommonChecks(input_api, output_api):
-    """Ensures this patch does not have trailing spaces, extra EOLs,
-       or long lines.
-    """
+  """Ensures this patch does not have trailing spaces, extra EOLs,
+     or long lines.
+  """
+  results = []
+  results.extend(
+      input_api.canned_checks.CheckChangeHasNoCrAndHasOnlyOneEol(
+          input_api, output_api))
+  results.extend(
+      input_api.canned_checks.CheckChangeHasNoTabs(input_api, output_api))
+  results.extend(
+      input_api.canned_checks.CheckChangeHasNoStrayWhitespace(
+          input_api, output_api))
 
-    results = []
+  source_file_filter = lambda x: input_api.FilterSourceFile(
+      x, files_to_skip=_GetFilesToSkip(input_api))
+  results.extend(
+      input_api.canned_checks.CheckLongLines(
+          input_api,
+          output_api,
+          maxlen=_LIBWEBP_MAX_LINE_LENGTH,
+          source_file_filter=source_file_filter))
+
+  results.extend(
+      input_api.canned_checks.CheckPatchFormatted(
+          input_api,
+          output_api,
+          check_clang_format=False,
+          check_python=True,
+          result_factory=output_api.PresubmitError))
+  results.extend(
+      _RunCmdOnCheckedFiles(input_api, output_api, _RunManCmd,
+                            _INCLUDE_MAN_FILES_ONLY))
+  # Run pylint.
+  results.extend(
+      input_api.canned_checks.RunPylint(
+          input_api,
+          output_api,
+          files_to_skip=_GetFilesToSkip(input_api),
+          pylintrc=".pylintrc",
+          version="2.7"))
+
+  # Binaries shellcheck and shfmt are not installed in depot_tools.
+  # Installation is needed
+  try:
+    subprocess2.communicate(["shellcheck", "--version"])
     results.extend(
-        input_api.canned_checks.CheckChangeHasNoCrAndHasOnlyOneEol(
-            input_api, output_api))
+        _RunCmdOnCheckedFiles(input_api, output_api, _RunShellCheckCmd,
+                              _INCLUDE_BASH_FILES_ONLY))
+    print("shfmt")
+    subprocess2.communicate(["shfmt", "-version"])
     results.extend(
-        input_api.canned_checks.CheckChangeHasNoTabs(input_api, output_api))
-    results.extend(
-        input_api.canned_checks.CheckChangeHasNoStrayWhitespace(
-            input_api, output_api))
-    results.extend(
-        input_api.canned_checks.CheckLongLines(
-            input_api, output_api, maxlen=_LIBWEBP_MAX_LINE_LENGTH))
-    results.extend(
-        input_api.canned_checks.CheckPatchFormatted(input_api,
-                                                    output_api,
-                                                    check_clang_format=False,
-                                                    check_python=True))
-    return results
+        _RunCmdOnCheckedFiles(input_api, output_api, _RunShfmtCheckCmd,
+                              _INCLUDE_BASH_FILES_ONLY))
+  except OSError as os_error:
+    results.append(
+        output_api.PresubmitPromptWarning(
+            "%s\nPlease install missing binaries locally." % os_error.args[0]))
+  return results
 
 
 def CheckChangeOnUpload(input_api, output_api):
-    results = []
-    results.extend(_CommonChecks(input_api, output_api))
-    results.extend(_CheckManFiles(input_api, output_api))
-    return results
+  results = []
+  results.extend(_CommonChecks(input_api, output_api))
+  return results
 
 
 def CheckChangeOnCommit(input_api, output_api):
-    results = []
-    results.extend(_CommonChecks(input_api, output_api))
-    results.extend(_CheckManFiles(input_api, output_api))
-    return results
+  results = []
+  results.extend(_CommonChecks(input_api, output_api))
+  return results
