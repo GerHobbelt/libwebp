@@ -1,3 +1,4 @@
+#!/bin/bash
 # Copyright (c) 2021, Google Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -28,46 +29,71 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-log_err() {
-  echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: $*" >&2
+set -xe
+
+LIBWEBP_ROOT="$(realpath "$(dirname "$0")/..")"
+readonly LIBWEBP_ROOT
+readonly WORKSPACE=${WORKSPACE:-"$(mktemp -d -t webp.scanbuild.XXX)"}
+
+# shellcheck source=infra/common.sh
+source "${LIBWEBP_ROOT}/infra/common.sh"
+
+usage() {
+  cat << EOF
+Usage: $(basename "$0") MODE
+Options:
+MODE supported scan modes: (shallow|deep)
+Environment variables:
+WORKSPACE directory where the build is done.
+EOF
 }
 
 #######################################
-# Create build directory. Build directory will be deleted if it exists.
-# Returns:
-#   mkdir result
-#######################################
-make_build_dir() {
-  if [[ "$#" -ne 1 ]]; then
-    return 1
-  fi
-
-  local build_dir
-  build_dir="$1"
-  rm -rf "${build_dir}"
-  mkdir -p "${build_dir}"
-}
-
-#######################################
-# Cleanup files from the build directory.
+# Wrap clang-tools scan-build.
+#
 # Args:
-#   $1 build directory
-# Globals:
-#   LIBWEBP_ROOT  repository's root path
+#   $* scan-build additional args.
+# Returns:
+#   scan-build retcode
+# Global:
+#   OUTPUT_DIR target directory where scan-build report is generated.
+#   MODE scan-build mode
 #######################################
-cleanup() {
-  # $1 is not completely removed to allow for binary artifacts to be
-  # extracted.
-  find "${1:?"Build directory not defined"}" \
-    \( -name "*.[ao]" -o -name "*.l[ao]" \) -exec rm -f {} +
+scan_build() {
+  scan-build -o "${OUTPUT_DIR}" --use-analyzer="$(command -v clang)" \
+    -analyzer-config mode="${MODE}" "$*"
 }
 
-#######################################
-# Setup ccache for toolchain.
-#######################################
-setup_ccache() {
-  if [[ -x "$(command -v ccache)" ]]; then
-    export CCACHE_CPP2=yes
-    export PATH="/usr/lib/ccache:${PATH}"
-  fi
-}
+MODE=${1:?"MODE is not specified.$(
+  echo
+  usage
+)"}
+
+readonly OUTPUT_DIR="${WORKSPACE}/output-${MODE}"
+readonly BUILD_DIR="${WORKSPACE}/build"
+
+make_build_dir "${OUTPUT_DIR}"
+make_build_dir "${BUILD_DIR}"
+
+cd "${LIBWEBP_ROOT}"
+./autogen.sh
+
+cd "${BUILD_DIR}"
+grep -m 1 -q 'enable-asserts' "${LIBWEBP_ROOT}/configure.ac" \
+    && args='--enable-asserts'
+scan_build "${LIBWEBP_ROOT}/configure" --enable-everything "${args}"
+scan_build make -j4
+
+index="$(find "${OUTPUT_DIR}" -name index.html)"
+if [[ -f "${index}" ]]; then
+  mv "$(dirname "${index}")/"* .
+else
+  # make a empty report to wipe out any old bug reports.
+  cat << EOT > index.html
+<html>
+<body>
+No bugs reported.
+</body>
+</html>
+EOT
+fi
