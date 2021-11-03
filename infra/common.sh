@@ -34,8 +34,10 @@ log_err() {
 
 #######################################
 # Create build directory. Build directory will be deleted if it exists.
+# Arguments:
+#   None.
 # Returns:
-#   mkdir result
+#   mkdir result.
 #######################################
 make_build_dir() {
   if [[ "$#" -ne 1 ]]; then
@@ -50,10 +52,10 @@ make_build_dir() {
 
 #######################################
 # Cleanup files from the build directory.
-# Args:
-#   $1 build directory
 # Globals:
-#   LIBWEBP_ROOT  repository's root path
+#   LIBWEBP_ROOT repository's root path.
+# Arguments:
+#   $1 build directory.
 #######################################
 cleanup() {
   # $1 is not completely removed to allow for binary artifacts to be
@@ -64,10 +66,41 @@ cleanup() {
 
 #######################################
 # Setup ccache for toolchain.
+# Globals:
+#   PATH
+# Arguments:
+#   None.
 #######################################
 setup_ccache() {
   if [[ -x "$(command -v ccache)" ]]; then
     export CCACHE_CPP2=yes
     export PATH="/usr/lib/ccache:${PATH}"
   fi
+}
+
+#######################################
+# Detects whether test block should be run in the current test shard.
+# Globals:
+#   TEST_TOTAL_SHARDS: Valid range: [1, N]. Defaults to 1.
+#   TEST_SHARD_INDEX: Valid range: [0, TEST_TOTAL_SHARDS). Defaults to 0.
+#   libwebp_test_id: current test number; incremented with each call.
+# Arguments:
+#   None
+# Returns:
+#   true if the shard is active
+#   false if the shard is inactive
+#######################################
+shard_should_run() {
+  TEST_TOTAL_SHARDS=${TEST_TOTAL_SHARDS:=1}
+  TEST_SHARD_INDEX=${TEST_SHARD_INDEX:=0}
+  libwebp_test_id=${libwebp_test_id:=-1}
+  : $((libwebp_test_id += 1))
+
+  if [[ "${TEST_SHARD_INDEX}" -lt 0 ||
+    "${TEST_SHARD_INDEX}" -ge "${TEST_TOTAL_SHARDS}" ]]; then
+    log_err "Invalid TEST_SHARD_INDEX (${TEST_SHARD_INDEX})!" \
+      "Expected [0, ${TEST_TOTAL_SHARDS})."
+  fi
+
+  [[ "$((libwebp_test_id % TEST_TOTAL_SHARDS))" -eq "${TEST_SHARD_INDEX}" ]]
 }
