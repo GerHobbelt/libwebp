@@ -73,18 +73,28 @@ typedef struct {
   toff_t pos;
 } MyData;
 
+static inline thandle_t thandle_from_ptr(MyData* ptr)
+{
+	return (thandle_t)(intptr_t)ptr;
+}
+
+static inline MyData* thandle_to_ptr(thandle_t fd)
+{
+	return (MyData*)(intptr_t)fd;
+}
+
 static int MyClose(thandle_t opaque) {
   (void)opaque;
   return 0;
 }
 
 static toff_t MySize(thandle_t opaque) {
-  const MyData* const my_data = (MyData*)opaque;
+  const MyData* const my_data = thandle_to_ptr(opaque);
   return my_data->size;
 }
 
 static toff_t MySeek(thandle_t opaque, toff_t offset, int whence) {
-  MyData* const my_data = (MyData*)opaque;
+  MyData* const my_data = thandle_to_ptr(opaque);
   offset += (whence == SEEK_CUR) ? my_data->pos
           : (whence == SEEK_SET) ? 0
           : my_data->size;
@@ -106,7 +116,7 @@ static void MyUnmapFile(thandle_t opaque, void* base, toff_t size) {
 }
 
 static tsize_t MyRead(thandle_t opaque, void* dst, tsize_t size) {
-  MyData* const my_data = (MyData*)opaque;
+  MyData* const my_data = thandle_to_ptr(opaque);
   if (my_data->pos + size > my_data->size) {
     size = (tsize_t)(my_data->size - my_data->pos);
   }
@@ -170,7 +180,7 @@ int ReadTIFF(const uint8_t* const data, size_t data_size,
     return 0;
   }
 
-  tif = TIFFClientOpen("Memory", "r", &my_data,
+  tif = TIFFClientOpen("Memory", "r", thandle_from_ptr(&my_data),
                        MyRead, MyRead, MySeek, MyClose,
                        MySize, MyMapFile, MyUnmapFile);
   if (tif == NULL) {
