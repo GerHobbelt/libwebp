@@ -15,13 +15,14 @@
 
 #include <math.h>
 
-#include "src/enc/backward_references_enc.h"
-#include "src/enc/histogram_enc.h"
 #include "src/dsp/lossless.h"
 #include "src/dsp/lossless_common.h"
+#include "src/enc/backward_references_enc.h"
+#include "src/enc/histogram_enc.h"
+#include "src/enc/vp8i_enc.h"
 #include "src/utils/utils.h"
 
-#define MAX_COST 1.e38
+#define MAX_BIT_COST 1.e38
 
 // Number of partitions for the three dominant (literal, red and blue) symbol
 // costs.
@@ -486,11 +487,11 @@ typedef struct {
 
 static void DominantCostRangeInit(DominantCostRange* const c) {
   c->literal_max_ = 0.;
-  c->literal_min_ = MAX_COST;
+  c->literal_min_ = MAX_BIT_COST;
   c->red_max_ = 0.;
-  c->red_min_ = MAX_COST;
+  c->red_min_ = MAX_BIT_COST;
   c->blue_max_ = 0.;
-  c->blue_min_ = MAX_COST;
+  c->blue_min_ = MAX_BIT_COST;
 }
 
 static void UpdateDominantCostRange(
@@ -1057,7 +1058,7 @@ static void HistogramRemap(const VP8LHistogramSet* const in,
   if (out_size > 1) {
     for (i = 0; i < in_size; ++i) {
       int best_out = 0;
-      double best_bits = MAX_COST;
+      double best_bits = MAX_BIT_COST;
       int k;
       if (in_histo[i] == NULL) {
         // Arbitrarily set to the previous value if unused to help future LZ77.
@@ -1169,13 +1170,13 @@ static void RemoveEmptyHistograms(VP8LHistogramSet* const image_histo) {
 }
 
 int VP8LGetHistoImageSymbols(int xsize, int ysize,
-                             const VP8LBackwardRefs* const refs,
-                             int quality, int low_effort,
-                             int histogram_bits, int cache_bits,
+                             const VP8LBackwardRefs* const refs, int quality,
+                             int low_effort, int histogram_bits, int cache_bits,
                              VP8LHistogramSet* const image_histo,
                              VP8LHistogram* const tmp_histo,
-                             uint16_t* const histogram_symbols) {
-  int ok = 0;
+                             uint16_t* const histogram_symbols,
+                             const WebPPicture* const pic, int percent_range,
+                             int* const percent) {
   const int histo_xsize =
       histogram_bits ? VP8LSubSampleSize(xsize, histogram_bits) : 1;
   const int histo_ysize =
@@ -1192,7 +1193,10 @@ int VP8LGetHistoImageSymbols(int xsize, int ysize,
       WebPSafeMalloc(2 * image_histo_raw_size, sizeof(map_tmp));
   uint16_t* const cluster_mappings = map_tmp + image_histo_raw_size;
   int num_used = image_histo_raw_size;
-  if (orig_histo == NULL || map_tmp == NULL) goto Error;
+  if (orig_histo == NULL || map_tmp == NULL) {
+    WebPEncodingSetError(pic, VP8_ENC_ERROR_OUT_OF_MEMORY);
+    goto Error;
+  }
 
   // Construct the histograms from backward references.
   HistogramBuild(xsize, histogram_bits, refs, orig_histo);
@@ -1212,10 +1216,9 @@ int VP8LGetHistoImageSymbols(int xsize, int ysize,
 
     HistogramAnalyzeEntropyBin(image_histo, bin_map, low_effort);
     // Collapse histograms with similar entropy.
-    HistogramCombineEntropyBin(image_histo, &num_used, histogram_symbols,
-                               cluster_mappings, tmp_histo, bin_map,
-                               entropy_combine_num_bins, combine_cost_factor,
-                               low_effort);
+    HistogramCombineEntropyBin(
+        image_histo, &num_used, histogram_symbols, cluster_mappings, tmp_histo,
+        bin_map, entropy_combine_num_bins, combine_cost_factor, low_effort);
     OptimizeHistogramSymbols(image_histo, cluster_mappings, num_clusters,
                              map_tmp, histogram_symbols);
   }
@@ -1229,11 +1232,13 @@ int VP8LGetHistoImageSymbols(int xsize, int ysize,
     int do_greedy;
     if (!HistogramCombineStochastic(image_histo, &num_used, threshold_size,
                                     &do_greedy)) {
+      WebPEncodingSetError(pic, VP8_ENC_ERROR_OUT_OF_MEMORY);
       goto Error;
     }
     if (do_greedy) {
       RemoveEmptyHistograms(image_histo);
       if (!HistogramCombineGreedy(image_histo, &num_used)) {
+        WebPEncodingSetError(pic, VP8_ENC_ERROR_OUT_OF_MEMORY);
         goto Error;
       }
     }
@@ -1243,10 +1248,12 @@ int VP8LGetHistoImageSymbols(int xsize, int ysize,
   RemoveEmptyHistograms(image_histo);
   HistogramRemap(orig_histo, image_histo, histogram_symbols);
 
-  ok = 1;
+  if (!WebPReportProgress(pic, *percent + percent_range, percent)) {
+    goto Error;
+  }
 
- Error:
+Error:
   VP8LFreeHistogramSet(orig_histo);
   WebPSafeFree(map_tmp);
-  return ok;
+  return (pic->error_code == VP8_ENC_OK);
 }
