@@ -12,8 +12,6 @@
 #ifndef WEBP_SHARPYUV_SHARPYUV_H_
 #define WEBP_SHARPYUV_SHARPYUV_H_
 
-#include <inttypes.h>
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,7 +25,11 @@ extern "C" {
 #if defined(__GNUC__) && __GNUC__ >= 4
 #define SHARPYUV_EXTERN extern __attribute__((visibility("default")))
 #else
+#if defined(_MSC_VER) && defined(WEBP_DLL)
+#define SHARPYUV_EXTERN __declspec(dllexport)
+#else
 #define SHARPYUV_EXTERN extern
+#endif /* _MSC_VER && WEBP_DLL */
 #endif /* __GNUC__ >= 4 */
 #endif /* WEBP_EXTERN */
 #endif /* SHARPYUV_EXTERN */
