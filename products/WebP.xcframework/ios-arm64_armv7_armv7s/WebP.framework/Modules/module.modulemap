@@ -1,0 +1,6 @@
+framework module WebP [system] {
+  header "decode.h"
+  header "encode.h"
+  header "types.h"
+  export *
+}
