@@ -544,7 +544,7 @@ if(WEBP_BUILD_VWEBP)
       vwebp
       ${OPENGL_LIBRARIES}
       exampleutil
-      ${GLUT_glut_LIBRARY}
+      GLUT::GLUT
       imageioutil
       webp
       webpdemux)
@@ -632,9 +632,9 @@ if(WEBP_BUILD_WEBP_JS)
     set(WEBP_HAVE_SDL 1)
     set_target_properties(
       webp_js
-      PROPERTIES LINK_FLAGS "-s WASM=0 \
-         -s EXPORTED_FUNCTIONS='[\"_WebpToSDL\"]' -s INVOKE_RUN=0 \
-         -s EXPORTED_RUNTIME_METHODS='[\"cwrap\"]'")
+      PROPERTIES LINK_FLAGS "-sWASM=0 \
+         -sEXPORTED_FUNCTIONS=_WebpToSDL -sINVOKE_RUN=0 \
+         -sEXPORTED_RUNTIME_METHODS=cwrap")
     set_target_properties(webp_js PROPERTIES OUTPUT_NAME webp)
     target_compile_definitions(webp_js PUBLIC EMSCRIPTEN WEBP_HAVE_SDL)
   endif()
@@ -645,9 +645,9 @@ if(WEBP_BUILD_WEBP_JS)
   target_include_directories(webp_wasm PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
   set_target_properties(
     webp_wasm
-    PROPERTIES LINK_FLAGS "-s WASM=1 \
-       -s EXPORTED_FUNCTIONS='[\"_WebpToSDL\"]' -s INVOKE_RUN=0 \
-       -s EXPORTED_RUNTIME_METHODS='[\"cwrap\"]'")
+    PROPERTIES LINK_FLAGS "-sWASM=1 \
+       -sEXPORTED_FUNCTIONS=_WebpToSDL -sINVOKE_RUN=0 \
+       -sEXPORTED_RUNTIME_METHODS=cwrap")
   target_compile_definitions(webp_wasm PUBLIC EMSCRIPTEN WEBP_HAVE_SDL)
 
   target_compile_definitions(webpdspdecode PUBLIC EMSCRIPTEN)
@@ -711,13 +711,16 @@ write_basic_package_version_file(
 include(CMakePackageConfigHelpers)
 # Fix libwebpmux reference. The target name libwebpmux is used for compatibility
 # purposes, but the library mentioned in WebPConfig.cmake should be the
-# unprefixed version.
-list(TRANSFORM INSTALLED_LIBRARIES REPLACE "libwebpmux" "webpmux")
+# unprefixed version. Note string(...) can be replaced with list(TRANSFORM ...)
+# if cmake_minimum_required is >= 3.12.
+string(REGEX REPLACE "libwebpmux" "webpmux" INSTALLED_LIBRARIES
+                     "${INSTALLED_LIBRARIES}")
+
 if(MSVC)
   # For compatibility with nmake, MSVC builds use a custom prefix (lib) that
   # needs to be included in the library name.
-  list(TRANSFORM INSTALLED_LIBRARIES
-       REPLACE "[A-Za-z0-9_]+" "${CMAKE_STATIC_LIBRARY_PREFIX}\\0")
+  string(REGEX REPLACE "[A-Za-z0-9_]+" "${CMAKE_STATIC_LIBRARY_PREFIX}\\0"
+                       INSTALLED_LIBRARIES "${INSTALLED_LIBRARIES}")
 endif()
 
 configure_package_config_file(
