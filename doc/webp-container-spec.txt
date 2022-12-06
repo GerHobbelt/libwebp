@@ -84,8 +84,8 @@ _uint32_
 _FourCC_
 
 : A _FourCC_ (four-character code) is a _uint32_ created by concatenating four
-  ASCII characters in little-endian order. This means 'aaaa' (%x61.61.61.61) and
-  'AAAA' (%x41.41.41.41) are treated as different _FourCCs_.
+  ASCII characters in little-endian order. This means 'aaaa' (0x61616161) and
+ 'AAAA' (0x41414141) are treated as different _FourCCs_.
 
 _1-based_
 
@@ -206,7 +206,7 @@ VP8 data: _Chunk Size_ bytes
 
 : VP8 bitstream data.
 
-Note the fourth character in the 'VP8 ' FourCC is an ASCII space (%x20).
+Note the fourth character in the 'VP8 ' FourCC is an ASCII space (0x20).
 
 The VP8 bitstream format specification can be found at [VP8 Data Format and
 Decoding Guide][vp8spec]. Note that the VP8 frame header contains the VP8 frame
@@ -292,7 +292,7 @@ details about frames can be found in the [Animation](#animation) section.
 
 All chunks SHOULD be placed in the same order as listed above. If a chunk
 appears in the wrong place, the file is invalid, but readers MAY parse the
-file, ignoring the chunks that come too late.
+file, ignoring the chunks that are out of order.
 
 **Rationale:** Setting the order of chunks should allow quicker file
 parsing. For example, if an 'ALPH' chunk does not appear in its required
@@ -366,7 +366,7 @@ Canvas Height Minus One: 24 bits
 
 The product of _Canvas Width_ and _Canvas Height_ MUST be at most `2^32 - 1`.
 
-Future specifications MAY add more fields.
+Future specifications may add more fields. Unknown fields MUST be ignored.
 
 ### Chunks
 
@@ -400,8 +400,8 @@ Background Color: 32 bits (_uint32_)
 
 **Note**:
 
-  * Background color MAY contain a transparency value (alpha), even if the
-    _Alpha_ flag in [VP8X chunk](#extended_header) is unset.
+  * Background color MAY contain a non-opaque alpha value, even if the _Alpha_
+    flag in [VP8X chunk](#extended_header) is unset.
 
   * Viewer applications SHOULD treat the background color value as a hint, and
     are not required to use it.
@@ -414,8 +414,8 @@ Loop Count: 16 bits (_uint16_)
 : The number of times to loop the animation. `0` means infinitely.
 
 This chunk MUST appear if the _Animation_ flag in the VP8X chunk is set.
-If the _Animation_ flag is not set and this chunk is present, it
-SHOULD be ignored.
+If the _Animation_ flag is not set and this chunk is present, it MUST be
+ignored.
 
 ANMF chunk:
 
@@ -721,7 +721,7 @@ XMP Metadata: _Chunk Size_ bytes
 
 : image metadata in XMP format.
 
-Note the fourth character in the 'XMP ' FourCC is an ASCII space (%x20).
+Note the fourth character in the 'XMP ' FourCC is an ASCII space (0x20).
 
 Additional guidance about handling metadata can be found in the
 Metadata Working Group's [Guidelines for Handling Metadata][metadata].
