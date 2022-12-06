@@ -25,7 +25,7 @@ to compress image data in a lossy way, or (ii) the WebP lossless encoding
 (and possibly other encodings in the future). These encoding schemes should
 make it more efficient than currently used formats. It is optimized for fast
 image transfer over the network (e.g., for websites). The WebP format has
-feature parity (color profile, metadata, animation etc) with other formats as
+feature parity (color profile, metadata, animation, etc.) with other formats as
 well. This document describes the structure of a WebP file.
 
 The WebP container (i.e., RIFF container for WebP) allows feature support over
@@ -686,8 +686,7 @@ If this chunk is not present, sRGB SHOULD be assumed.
 Metadata can be stored in 'EXIF' or 'XMP ' chunks.
 
 There SHOULD be at most one chunk of each type ('EXIF' and 'XMP '). If there
-are more such chunks, readers MAY ignore all except the first one. Also, a file
-may possibly contain both 'EXIF' and 'XMP ' chunks.
+are more such chunks, readers MAY ignore all except the first one.
 
 The chunks are defined as follows:
 
