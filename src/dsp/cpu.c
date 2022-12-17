@@ -173,7 +173,7 @@ static int x86CPUInfo(CPUFeature feature) {
   }
   return 0;
 }
-VP8CPUInfo VP8GetCPUInfo = x86CPUInfo;
+static VP8CPUInfo VP8GetCPUInfo = x86CPUInfo;
 #elif defined(WEBP_ANDROID_NEON)  // NB: needs to be before generic NEON test.
 static int AndroidCPUInfo(CPUFeature feature) {
   const AndroidCpuFamily cpu_family = android_getCpuFamily();
@@ -184,7 +184,7 @@ static int AndroidCPUInfo(CPUFeature feature) {
   }
   return 0;
 }
-VP8CPUInfo VP8GetCPUInfo = AndroidCPUInfo;
+static VP8CPUInfo VP8GetCPUInfo = AndroidCPUInfo;
 #elif defined(EMSCRIPTEN) // also needs to be before generic NEON test
 // Use compile flags as an indicator of SIMD support instead of a runtime check.
 static int wasmCPUInfo(CPUFeature feature) {
@@ -208,7 +208,7 @@ static int wasmCPUInfo(CPUFeature feature) {
   }
   return 0;
 }
-VP8CPUInfo VP8GetCPUInfo = wasmCPUInfo;
+static VP8CPUInfo VP8GetCPUInfo = wasmCPUInfo;
 #elif defined(WEBP_HAVE_NEON)
 // In most cases this function doesn't check for NEON support (it's assumed by
 // the configuration), but enables turning off NEON at runtime, for testing
@@ -236,7 +236,7 @@ static int armCPUInfo(CPUFeature feature) {
   return 1;
 #endif
 }
-VP8CPUInfo VP8GetCPUInfo = armCPUInfo;
+static VP8CPUInfo VP8GetCPUInfo = armCPUInfo;
 #elif defined(WEBP_USE_MIPS32) || defined(WEBP_USE_MIPS_DSP_R2) || \
       defined(WEBP_USE_MSA)
 static int mipsCPUInfo(CPUFeature feature) {
@@ -247,7 +247,24 @@ static int mipsCPUInfo(CPUFeature feature) {
   }
 
 }
-VP8CPUInfo VP8GetCPUInfo = mipsCPUInfo;
+static VP8CPUInfo VP8GetCPUInfo = mipsCPUInfo;
 #else
-VP8CPUInfo VP8GetCPUInfo = NULL;
+static VP8CPUInfo VP8GetCPUInfo = NULL;
 #endif
+
+static int VP8GetCPUInfoDummyFunc(CPUFeature feature)
+{
+	return 0;
+}
+
+VP8CPUInfo GetVP8GetCPUInfo(void)
+{
+	if (VP8GetCPUInfo != NULL)
+		return VP8GetCPUInfo;
+	else
+		return VP8GetCPUInfoDummyFunc;
+}
+void SetVP8GetCPUInfo(VP8CPUInfo f)
+{
+	VP8GetCPUInfo = f;
+}

@@ -12,6 +12,7 @@
 // Author: Skal (pascal.massimino@gmail.com)
 
 #include "src/dsp/yuv.h"
+#include "src/dsp/cpu.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -89,28 +90,26 @@ WEBP_DSP_INIT_FUNC(WebPInitSamplers) {
   WebPSamplers[MODE_rgbA_4444] = YuvToRgba4444Row;
 
   // If defined, use CPUInfo() to overwrite some pointers with faster versions.
-  if (VP8GetCPUInfo != NULL) {
 #if defined(WEBP_HAVE_SSE2)
-    if (VP8GetCPUInfo(kSSE2)) {
+    if (GetVP8GetCPUInfo()(kSSE2)) {
       WebPInitSamplersSSE2();
     }
 #endif  // WEBP_HAVE_SSE2
 #if defined(WEBP_HAVE_SSE41)
-    if (VP8GetCPUInfo(kSSE4_1)) {
+    if (GetVP8GetCPUInfo()(kSSE4_1)) {
       WebPInitSamplersSSE41();
     }
 #endif  // WEBP_HAVE_SSE41
 #if defined(WEBP_USE_MIPS32)
-    if (VP8GetCPUInfo(kMIPS32)) {
+    if (GetVP8GetCPUInfo()(kMIPS32)) {
       WebPInitSamplersMIPS32();
     }
 #endif  // WEBP_USE_MIPS32
 #if defined(WEBP_USE_MIPS_DSP_R2)
-    if (VP8GetCPUInfo(kMIPSdspR2)) {
+    if (GetVP8GetCPUInfo()(kMIPSdspR2)) {
       WebPInitSamplersMIPSdspR2();
     }
 #endif  // WEBP_USE_MIPS_DSP_R2
-  }
 }
 
 //-----------------------------------------------------------------------------
@@ -216,22 +215,20 @@ WEBP_DSP_INIT_FUNC(WebPInitConvertARGBToYUV) {
 
   WebPConvertRGBA32ToUV = WebPConvertRGBA32ToUV_C;
 
-  if (VP8GetCPUInfo != NULL) {
 #if defined(WEBP_HAVE_SSE2)
-    if (VP8GetCPUInfo(kSSE2)) {
+    if (GetVP8GetCPUInfo()(kSSE2)) {
       WebPInitConvertARGBToYUVSSE2();
     }
 #endif  // WEBP_HAVE_SSE2
 #if defined(WEBP_HAVE_SSE41)
-    if (VP8GetCPUInfo(kSSE4_1)) {
+    if (GetVP8GetCPUInfo()(kSSE4_1)) {
       WebPInitConvertARGBToYUVSSE41();
     }
 #endif  // WEBP_HAVE_SSE41
-  }
 
 #if defined(WEBP_HAVE_NEON)
   if (WEBP_NEON_OMIT_C_CODE ||
-      (VP8GetCPUInfo != NULL && VP8GetCPUInfo(kNEON))) {
+      (GetVP8GetCPUInfo()(kNEON))) {
     WebPInitConvertARGBToYUVNEON();
   }
 #endif  // WEBP_HAVE_NEON

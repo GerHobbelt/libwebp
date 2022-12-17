@@ -160,22 +160,22 @@
 
 #define WEBP_DSP_INIT(func)                                         \
   do {                                                              \
-    static volatile VP8CPUInfo func##_last_cpuinfo_used =           \
-        (VP8CPUInfo)&func##_last_cpuinfo_used;                      \
+    static volatile uint8_t func##_last_cpuinfo_used =              \
+        0;                                                          \
     static pthread_mutex_t func##_lock = PTHREAD_MUTEX_INITIALIZER; \
     if (pthread_mutex_lock(&func##_lock)) break;                    \
-    if (func##_last_cpuinfo_used != VP8GetCPUInfo) func();          \
-    func##_last_cpuinfo_used = VP8GetCPUInfo;                       \
+    if (!func##_last_cpuinfo_used) func();                          \
+    func##_last_cpuinfo_used = 1;                                   \
     (void)pthread_mutex_unlock(&func##_lock);                       \
   } while (0)
 #else  // !(defined(WEBP_USE_THREAD) && !defined(_WIN32))
 #define WEBP_DSP_INIT(func)                               \
   do {                                                    \
-    static volatile VP8CPUInfo func##_last_cpuinfo_used = \
-        (VP8CPUInfo)&func##_last_cpuinfo_used;            \
-    if (func##_last_cpuinfo_used == VP8GetCPUInfo) break; \
+    static volatile uint8_t func##_last_cpuinfo_used =    \
+        0;                                                \
+    if (func##_last_cpuinfo_used) break;                  \
     func();                                               \
-    func##_last_cpuinfo_used = VP8GetCPUInfo;             \
+    func##_last_cpuinfo_used = 1;                         \
   } while (0)
 #endif  // defined(WEBP_USE_THREAD) && !defined(_WIN32)
 
@@ -247,7 +247,9 @@ extern "C" {
 
 // returns true if the CPU supports the feature.
 typedef int (*VP8CPUInfo)(CPUFeature feature);
-WEBP_EXTERN VP8CPUInfo VP8GetCPUInfo;
+
+VP8CPUInfo GetVP8GetCPUInfo(void);
+void SetVP8GetCPUInfo(VP8CPUInfo f);
 
 #ifdef __cplusplus
 }    // extern "C"

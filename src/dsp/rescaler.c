@@ -213,32 +213,30 @@ WEBP_DSP_INIT_FUNC(WebPRescalerDspInit) {
   WebPRescalerImportRowExpand = WebPRescalerImportRowExpand_C;
   WebPRescalerImportRowShrink = WebPRescalerImportRowShrink_C;
 
-  if (VP8GetCPUInfo != NULL) {
 #if defined(WEBP_HAVE_SSE2)
-    if (VP8GetCPUInfo(kSSE2)) {
+    if (GetVP8GetCPUInfo()(kSSE2)) {
       WebPRescalerDspInitSSE2();
     }
 #endif
 #if defined(WEBP_USE_MIPS32)
-    if (VP8GetCPUInfo(kMIPS32)) {
+    if (GetVP8GetCPUInfo()(kMIPS32)) {
       WebPRescalerDspInitMIPS32();
     }
 #endif
 #if defined(WEBP_USE_MIPS_DSP_R2)
-    if (VP8GetCPUInfo(kMIPSdspR2)) {
+    if (GetVP8GetCPUInfo()(kMIPSdspR2)) {
       WebPRescalerDspInitMIPSdspR2();
     }
 #endif
 #if defined(WEBP_USE_MSA)
-    if (VP8GetCPUInfo(kMSA)) {
+    if (GetVP8GetCPUInfo()(kMSA)) {
       WebPRescalerDspInitMSA();
     }
 #endif
-  }
 
 #if defined(WEBP_HAVE_NEON)
   if (WEBP_NEON_OMIT_C_CODE ||
-      (VP8GetCPUInfo != NULL && VP8GetCPUInfo(kNEON))) {
+      (GetVP8GetCPUInfo()(kNEON))) {
     WebPRescalerDspInitNEON();
   }
 #endif

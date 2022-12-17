@@ -505,7 +505,7 @@ static int ImportYUVAFromRGBA(const uint8_t* r_ptr,
   }
 
   if (use_iterative_conversion) {
-    SharpYuvInit(VP8GetCPUInfo);
+    SharpYuvInit(GetVP8GetCPUInfo());
     if (!PreprocessARGB(r_ptr, g_ptr, b_ptr, step, rgb_stride, picture)) {
       return 0;
     }

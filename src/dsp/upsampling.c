@@ -232,23 +232,21 @@ WEBP_DSP_INIT_FUNC(WebPInitYUV444Converters) {
   WebPYUV444Converters[MODE_Argb]      = WebPYuv444ToArgb_C;
   WebPYUV444Converters[MODE_rgbA_4444] = WebPYuv444ToRgba4444_C;
 
-  if (VP8GetCPUInfo != NULL) {
 #if defined(WEBP_HAVE_SSE2)
-    if (VP8GetCPUInfo(kSSE2)) {
+    if (GetVP8GetCPUInfo()(kSSE2)) {
       WebPInitYUV444ConvertersSSE2();
     }
 #endif
 #if defined(WEBP_HAVE_SSE41)
-    if (VP8GetCPUInfo(kSSE4_1)) {
+    if (GetVP8GetCPUInfo()(kSSE4_1)) {
       WebPInitYUV444ConvertersSSE41();
     }
 #endif
 #if defined(WEBP_USE_MIPS_DSP_R2)
-    if (VP8GetCPUInfo(kMIPSdspR2)) {
+    if (GetVP8GetCPUInfo()(kMIPSdspR2)) {
       WebPInitYUV444ConvertersMIPSdspR2();
     }
 #endif
-  }
 }
 
 //------------------------------------------------------------------------------
@@ -277,32 +275,30 @@ WEBP_DSP_INIT_FUNC(WebPInitUpsamplers) {
 #endif
 
   // If defined, use CPUInfo() to overwrite some pointers with faster versions.
-  if (VP8GetCPUInfo != NULL) {
 #if defined(WEBP_HAVE_SSE2)
-    if (VP8GetCPUInfo(kSSE2)) {
+    if (GetVP8GetCPUInfo()(kSSE2)) {
       WebPInitUpsamplersSSE2();
     }
 #endif
 #if defined(WEBP_HAVE_SSE41)
-    if (VP8GetCPUInfo(kSSE4_1)) {
+    if (GetVP8GetCPUInfo()(kSSE4_1)) {
       WebPInitUpsamplersSSE41();
     }
 #endif
 #if defined(WEBP_USE_MIPS_DSP_R2)
-    if (VP8GetCPUInfo(kMIPSdspR2)) {
+    if (GetVP8GetCPUInfo()(kMIPSdspR2)) {
       WebPInitUpsamplersMIPSdspR2();
     }
 #endif
 #if defined(WEBP_USE_MSA)
-    if (VP8GetCPUInfo(kMSA)) {
+    if (GetVP8GetCPUInfo()(kMSA)) {
       WebPInitUpsamplersMSA();
     }
 #endif
-  }
 
 #if defined(WEBP_HAVE_NEON)
   if (WEBP_NEON_OMIT_C_CODE ||
-      (VP8GetCPUInfo != NULL && VP8GetCPUInfo(kNEON))) {
+      (GetVP8GetCPUInfo()(kNEON))) {
     WebPInitUpsamplersNEON();
   }
 #endif

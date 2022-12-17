@@ -253,27 +253,25 @@ WEBP_DSP_INIT_FUNC(VP8FiltersInit) {
   WebPFilters[WEBP_FILTER_GRADIENT] = GradientFilter_C;
 #endif
 
-  if (VP8GetCPUInfo != NULL) {
 #if defined(WEBP_HAVE_SSE2)
-    if (VP8GetCPUInfo(kSSE2)) {
+    if (GetVP8GetCPUInfo()(kSSE2)) {
       VP8FiltersInitSSE2();
     }
 #endif
 #if defined(WEBP_USE_MIPS_DSP_R2)
-    if (VP8GetCPUInfo(kMIPSdspR2)) {
+    if (GetVP8GetCPUInfo()(kMIPSdspR2)) {
       VP8FiltersInitMIPSdspR2();
     }
 #endif
 #if defined(WEBP_USE_MSA)
-    if (VP8GetCPUInfo(kMSA)) {
+    if (GetVP8GetCPUInfo()(kMSA)) {
       VP8FiltersInitMSA();
     }
 #endif
-  }
 
 #if defined(WEBP_HAVE_NEON)
   if (WEBP_NEON_OMIT_C_CODE ||
-      (VP8GetCPUInfo != NULL && VP8GetCPUInfo(kNEON))) {
+      (GetVP8GetCPUInfo()(kNEON))) {
     VP8FiltersInitNEON();
   }
 #endif

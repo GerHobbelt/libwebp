@@ -21,6 +21,8 @@
 #include "src/webp/config.h"
 #endif
 
+#include "src/dsp/cpu.h"
+
 #ifdef BUILD_MONOLITHIC
 #include "extras/tools.h"
 #endif
@@ -37,8 +39,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-extern void* VP8GetCPUInfo;   // opaque forward declaration.
 
 #ifdef __cplusplus
 }    // extern "C"
@@ -837,7 +837,7 @@ int main(int argc, const char** argv)
       resize_h = ExUtilGetInt(argv[++c], 0, &parse_error);
 #ifndef WEBP_DLL
     } else if (!strcmp(argv[c], "-noasm")) {
-      VP8GetCPUInfo = NULL;
+      SetVP8GetCPUInfo(NULL);
 #endif
     } else if (!strcmp(argv[c], "-version")) {
       const int version = WebPGetEncoderVersion();

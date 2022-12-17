@@ -16,7 +16,7 @@
 // SharpYuvInit() replaces the use of the function pointer.
 #undef WEBP_EXTERN
 #define WEBP_EXTERN extern
-#define VP8GetCPUInfo SharpYuvGetCPUInfo
+//#define VP8GetCPUInfo SharpYuvGetCPUInfo
 #include "src/dsp/cpu.h"
 
 #endif  // WEBP_SHARPYUV_SHARPYUV_CPU_H_

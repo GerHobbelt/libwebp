@@ -23,7 +23,7 @@
 
 namespace {
 
-const VP8CPUInfo default_VP8GetCPUInfo = VP8GetCPUInfo;
+const VP8CPUInfo default_VP8GetCPUInfo = GetVP8GetCPUInfo();
 
 int AddFrame(WebPAnimEncoder** const enc,
              const WebPAnimEncoderOptions& anim_config, int* const width,

@@ -24,6 +24,7 @@
 #include "./img_grid.h"
 #include "./img_peak.h"
 #include "src/dsp/dsp.h"
+#include "src/dsp/cpu.h"
 #include "src/webp/encode.h"
 
 //------------------------------------------------------------------------------
@@ -95,7 +96,7 @@ static WEBP_INLINE void ExtractAndDisableOptimizations(
                                       GetCPUInfoNoSSE41, GetCPUInfoNoAVX,
                                       GetCPUInfo};
   int VP8GetCPUInfo_index = Extract(4, data, size, bit_pos);
-  VP8GetCPUInfo = kVP8CPUInfos[VP8GetCPUInfo_index];
+  SetVP8GetCPUInfo(kVP8CPUInfos[VP8GetCPUInfo_index]);
 }
 
 //------------------------------------------------------------------------------

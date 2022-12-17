@@ -495,7 +495,7 @@ static int GetCoeffsAlt(VP8BitReader* const br,
 }
 
 WEBP_DSP_INIT_FUNC(InitGetCoeffs) {
-  if (VP8GetCPUInfo != NULL && VP8GetCPUInfo(kSlowSSSE3)) {
+  if (GetVP8GetCPUInfo()(kSlowSSSE3)) {
     GetCoeffs = GetCoeffsAlt;
   } else {
     GetCoeffs = GetCoeffsFast;

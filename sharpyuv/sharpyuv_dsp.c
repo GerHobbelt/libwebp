@@ -17,6 +17,7 @@
 #include <stdlib.h>
 
 #include "sharpyuv/sharpyuv_cpu.h"
+#include "src/dsp/cpu.h"
 
 //-----------------------------------------------------------------------------
 
@@ -82,13 +83,11 @@ void SharpYuvInitDsp(void) {
   SharpYuvFilterRow = SharpYuvFilterRow_C;
 #endif
 
-  if (SharpYuvGetCPUInfo != NULL) {
 #if defined(WEBP_HAVE_SSE2)
-    if (SharpYuvGetCPUInfo(kSSE2)) {
+    if (GetVP8GetCPUInfo()(kSSE2)) {
       InitSharpYuvSSE2();
     }
 #endif  // WEBP_HAVE_SSE2
-  }
 
 #if defined(WEBP_HAVE_NEON)
   if (WEBP_NEON_OMIT_C_CODE ||

@@ -20,6 +20,8 @@
 #include "src/webp/config.h"
 #endif
 
+#include "src/dsp/cpu.h"
+
 #ifdef BUILD_MONOLITHIC
 #include "extras/tools.h"
 #endif
@@ -36,8 +38,6 @@ static int quiet = 0;
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-extern void* VP8GetCPUInfo;   // opaque forward declaration.
 
 #ifdef __cplusplus
 }    // extern "C"
@@ -292,7 +292,7 @@ int main(int argc, const char** argv)
       verbose = 1;
 #ifndef WEBP_DLL
     } else if (!strcmp(argv[c], "-noasm")) {
-      VP8GetCPUInfo = NULL;
+      SetVP8GetCPUInfo(NULL);
 #endif
     } else if (!strcmp(argv[c], "-incremental")) {
       incremental = 1;
