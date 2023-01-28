@@ -261,8 +261,8 @@ int ReadJPEG(const uint8_t* const data, size_t data_size,
   volatile int ok = 0;
   int width, height;
   int64_t stride;
-  volatile struct jpeg_decompress_struct dinfo;
-  struct my_error_mgr jerr;
+  volatile struct jpeg_decompress_struct dinfo = { 0 };
+  struct my_error_mgr jerr = { 0 };
   uint8_t* volatile rgb = NULL;
   JSAMPROW buffer[1];
   JPEGReadContext ctx;
