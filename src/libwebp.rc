@@ -1,6 +1,10 @@
+
+//#define WIN32_LEAN_AND_MEAN
 #define APSTUDIO_READONLY_SYMBOLS
-#include "winres.h"
-#undef APSTUDIO_READONLY_SYMBOLS
+#define APSTUDIO_HIDDEN_SYMBOLS
+#include <windows.h>
+#include <winver.h>
+
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
 LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
