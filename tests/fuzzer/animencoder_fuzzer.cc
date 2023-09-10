@@ -47,6 +47,7 @@ int AddFrame(WebPAnimEncoder** const enc,
   // Read the source picture.
   if (!ExtractSourcePicture(&pic, data, size, bit_pos)) {
     const WebPEncodingError error_code = pic.error_code;
+    WebPAnimEncoderDelete(*enc);
     WebPPictureFree(&pic);
     if (error_code == VP8_ENC_ERROR_OUT_OF_MEMORY) return 0;
     fprintf(stderr, "Can't read input image. Error code: %d\n", error_code);
@@ -163,7 +164,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* const data, size_t size) {
   }
   WebPData webp_data;
   WebPDataInit(&webp_data);
-  if (!WebPAnimEncoderAssemble(enc, &webp_data)) {
+  // Tolerate failures when running under the nallocfuzz engine as allocations
+  // during assembly may fail.
+  if (!WebPAnimEncoderAssemble(enc, &webp_data) &&
+      getenv("NALLOC_FUZZ_VERSION") == nullptr) {
     fprintf(stderr, "WebPAnimEncoderAssemble failed: %s.\n",
             WebPAnimEncoderGetError(enc));
     WebPAnimEncoderDelete(enc);
