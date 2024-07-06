@@ -37,6 +37,7 @@
 static WebPMuxError MuxGet(const WebPMux* const mux, CHUNK_INDEX idx,
                            uint32_t nth, WebPData* const data) {
   assert(mux != NULL);
+  assert(idx != IDX_LAST_CHUNK);
   assert(!IsWPI(kChunks[idx].id));
   WebPDataInit(data);
 
@@ -431,6 +432,7 @@ WebPMuxError WebPMuxGetChunk(const WebPMux* mux, const char fourcc[4],
     return WEBP_MUX_INVALID_ARGUMENT;
   }
   idx = ChunkGetIndexFromFourCC(fourcc);
+  assert(idx != IDX_LAST_CHUNK);
   if (IsWPI(kChunks[idx].id)) {     // An image chunk.
     return WEBP_MUX_INVALID_ARGUMENT;
   } else if (idx != IDX_UNKNOWN) {  // A known chunk type.
