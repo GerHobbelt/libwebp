@@ -15,6 +15,7 @@
 // Author: James Zern (jzern@google.com)
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef HAVE_CONFIG_H
 #include "src/webp/config.h"
@@ -70,7 +71,7 @@ int main(int argc, const char** argv)
     size_t webp_size = 0;
     if (!strcmp(argv[c], "-h")) {
       printf("Usage: %s [-h] image.webp [more_files.webp...]\n", argv[0]);
-      FREE_WARGV_AND_RETURN(0);
+      FREE_WARGV_AND_RETURN(EXIT_SUCCESS);
     } else {
       file = (const char*)GET_WARGV(argv, c);
     }
@@ -96,7 +97,7 @@ int main(int argc, const char** argv)
 
  Error:
   SDL_Quit();
-  FREE_WARGV_AND_RETURN(ok ? 0 : 1);
+  FREE_WARGV_AND_RETURN(ok ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
 #else  // !WEBP_HAVE_SDL

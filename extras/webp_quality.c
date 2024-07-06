@@ -19,6 +19,7 @@
 #include "extras/tools.h"
 #endif
 
+// Returns EXIT_SUCCESS on success, EXIT_FAILURE on failure.
 #ifdef BUILD_MONOLITHIC
 int webp_quality_main(int argc, const char** argv)
 #else
@@ -36,7 +37,7 @@ int main(int argc, const char** argv)
       quiet = 1;
     } else if (!strcmp(argv[c], "-help") || !strcmp(argv[c], "-h")) {
       printf("webp_quality [-h][-quiet] webp_files...\n");
-      FREE_WARGV_AND_RETURN(0);
+      FREE_WARGV_AND_RETURN(EXIT_SUCCESS);
     } else {
       const char* const filename = (const char*)GET_WARGV(argv, c);
       const uint8_t* data = NULL;
@@ -59,5 +60,5 @@ int main(int argc, const char** argv)
       free((void*)data);
     }
   }
-  FREE_WARGV_AND_RETURN(ok ? 0 : 1);
+  FREE_WARGV_AND_RETURN(ok ? EXIT_SUCCESS : EXIT_FAILURE);
 }

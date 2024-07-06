@@ -14,6 +14,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #ifdef HAVE_CONFIG_H
 #include "src/webp/config.h"
@@ -1139,7 +1140,7 @@ int main(int argc, const char** argv)
 
   if (argc == 1) {
     Help();
-    FREE_WARGV_AND_RETURN(WEBP_INFO_OK);
+    FREE_WARGV_AND_RETURN(EXIT_SUCCESS);
   }
 
   // Parse command-line input.
@@ -1147,7 +1148,7 @@ int main(int argc, const char** argv)
     if (!strcmp(argv[c], "-h") || !strcmp(argv[c], "-help") ||
         !strcmp(argv[c], "-H") || !strcmp(argv[c], "-longhelp")) {
       Help();
-      FREE_WARGV_AND_RETURN(WEBP_INFO_OK);
+      FREE_WARGV_AND_RETURN(EXIT_SUCCESS);
     } else if (!strcmp(argv[c], "-quiet")) {
       quiet = 1;
     } else if (!strcmp(argv[c], "-diag")) {
@@ -1160,7 +1161,7 @@ int main(int argc, const char** argv)
       const int version = WebPGetDecoderVersion();
       printf("WebP Decoder version: %d.%d.%d\n",
              (version >> 16) & 0xff, (version >> 8) & 0xff, version & 0xff);
-      FREE_WARGV_AND_RETURN(0);
+      FREE_WARGV_AND_RETURN(EXIT_SUCCESS);
     } else {  // Assume the remaining are all input files.
       break;
     }
@@ -1168,7 +1169,7 @@ int main(int argc, const char** argv)
 
   if (c == argc) {
     Help();
-    FREE_WARGV_AND_RETURN(WEBP_INFO_INVALID_COMMAND);
+    FREE_WARGV_AND_RETURN(EXIT_FAILURE);
   }
 
   // Process input files one by one.
@@ -1191,5 +1192,6 @@ int main(int argc, const char** argv)
     webp_info_status = AnalyzeWebP(&webp_info, &webp_data);
     WebPDataClear(&webp_data);
   }
-  FREE_WARGV_AND_RETURN(webp_info_status);
+  FREE_WARGV_AND_RETURN((webp_info_status == WEBP_INFO_OK) ? EXIT_SUCCESS
+                                                           : EXIT_FAILURE);
 }

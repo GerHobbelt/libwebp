@@ -160,7 +160,7 @@ int main(int argc, const char** argv)
   INIT_WARGV(argc, argv);
 
   ok = ExUtilInitCommandLineArguments(argc - 1, argv + 1, &cmd_args);
-  if (!ok) FREE_WARGV_AND_RETURN(1);
+  if (!ok) FREE_WARGV_AND_RETURN(EXIT_FAILURE);
 
   argc = cmd_args.argc_;
   argv = cmd_args.argv_;
@@ -208,7 +208,7 @@ int main(int argc, const char** argv)
         verbose = 1;
       } else if (!strcmp(argv[c], "-h") || !strcmp(argv[c], "-help")) {
         Help();
-        FREE_WARGV_AND_RETURN(0);
+        FREE_WARGV_AND_RETURN(EXIT_SUCCESS);
       } else if (!strcmp(argv[c], "-version")) {
         const int enc_version = WebPGetEncoderVersion();
         const int mux_version = WebPGetMuxVersion();
@@ -344,5 +344,5 @@ int main(int argc, const char** argv)
   }
   WebPDataClear(&webp_data);
   ExUtilDeleteCommandLineArguments(&cmd_args);
-  FREE_WARGV_AND_RETURN(ok ? 0 : 1);
+  FREE_WARGV_AND_RETURN(ok ? EXIT_SUCCESS : EXIT_FAILURE);
 }

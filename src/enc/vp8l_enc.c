@@ -30,6 +30,7 @@
 
 // Maximum number of histogram images (sub-blocks).
 #define MAX_HUFF_IMAGE_SIZE       2600
+#define MAX_HUFFMAN_BITS (MIN_HUFFMAN_BITS + (1 << NUM_HUFFMAN_BITS) - 1)
 
 // -----------------------------------------------------------------------------
 // Palette
@@ -280,7 +281,7 @@ static int EncoderAnalyze(VP8LEncoder* const enc,
   const int method = config->method;
   const int low_effort = (config->method == 0);
   int i;
-  int use_palette;
+  int use_palette, transform_bits;
   int n_lz77s;
   // If set to 0, analyze the cache with the computed cache value. If 1, also
   // analyze with no-cache.
@@ -297,7 +298,9 @@ static int EncoderAnalyze(VP8LEncoder* const enc,
   // Empirical bit sizes.
   enc->histo_bits_ = GetHistoBits(method, use_palette,
                                   pic->width, pic->height);
-  enc->transform_bits_ = GetTransformBits(method, enc->histo_bits_);
+  transform_bits = GetTransformBits(method, enc->histo_bits_);
+  enc->predictor_transform_bits_ = transform_bits;
+  enc->cross_color_transform_bits_ = transform_bits;
 
   if (low_effort) {
     // AnalyzeEntropy is somewhat slow.
@@ -311,8 +314,8 @@ static int EncoderAnalyze(VP8LEncoder* const enc,
     // Try out multiple LZ77 on images with few colors.
     n_lz77s = (enc->palette_size_ > 0 && enc->palette_size_ <= 16) ? 2 : 1;
     if (!AnalyzeEntropy(pic->argb, width, height, pic->argb_stride, use_palette,
-                        enc->palette_size_, enc->transform_bits_,
-                        &min_entropy_ix, red_and_blue_always_zero)) {
+                        enc->palette_size_, transform_bits, &min_entropy_ix,
+                        red_and_blue_always_zero)) {
       return 0;
     }
     if (method == 6 && config->quality == 100) {
@@ -1064,54 +1067,55 @@ static void ApplySubtractGreen(VP8LEncoder* const enc, int width, int height,
   VP8LSubtractGreenFromBlueAndRed(enc->argb_, width * height);
 }
 
-static int ApplyPredictFilter(const VP8LEncoder* const enc, int width,
-                              int height, int quality, int low_effort,
+static int ApplyPredictFilter(VP8LEncoder* const enc, int width, int height,
+                              int quality, int low_effort,
                               int used_subtract_green, VP8LBitWriter* const bw,
                               int percent_range, int* const percent) {
-  const int pred_bits = enc->transform_bits_;
-  const int transform_width = VP8LSubSampleSize(width, pred_bits);
-  const int transform_height = VP8LSubSampleSize(height, pred_bits);
+  const int min_bits = enc->predictor_transform_bits_;
+  int best_bits;
   // we disable near-lossless quantization if palette is used.
   const int near_lossless_strength =
       enc->use_palette_ ? 100 : enc->config_->near_lossless;
 
-  if (!VP8LResidualImage(
-          width, height, pred_bits, low_effort, enc->argb_, enc->argb_scratch_,
-          enc->transform_data_, near_lossless_strength, enc->config_->exact,
-          used_subtract_green, enc->pic_, percent_range / 2, percent)) {
+  if (!VP8LResidualImage(width, height, min_bits, low_effort, enc->argb_,
+                         enc->argb_scratch_, enc->transform_data_,
+                         near_lossless_strength, enc->config_->exact,
+                         used_subtract_green, enc->pic_, percent_range / 2,
+                         percent, &best_bits)) {
     return 0;
   }
   VP8LPutBits(bw, TRANSFORM_PRESENT, 1);
   VP8LPutBits(bw, PREDICTOR_TRANSFORM, 2);
-  assert(pred_bits >= 2);
-  VP8LPutBits(bw, pred_bits - 2, 3);
+  assert(best_bits >= MIN_TRANSFORM_BITS && best_bits <= MAX_TRANSFORM_BITS);
+  VP8LPutBits(bw, best_bits - MIN_TRANSFORM_BITS, NUM_TRANSFORM_BITS);
+  enc->predictor_transform_bits_ = best_bits;
   return EncodeImageNoHuffman(
-      bw, enc->transform_data_, (VP8LHashChain*)&enc->hash_chain_,
-      (VP8LBackwardRefs*)&enc->refs_[0], transform_width, transform_height,
+      bw, enc->transform_data_, &enc->hash_chain_, &enc->refs_[0],
+      VP8LSubSampleSize(width, best_bits), VP8LSubSampleSize(height, best_bits),
       quality, low_effort, enc->pic_, percent_range - percent_range / 2,
       percent);
 }
 
-static int ApplyCrossColorFilter(const VP8LEncoder* const enc, int width,
-                                 int height, int quality, int low_effort,
+static int ApplyCrossColorFilter(VP8LEncoder* const enc, int width, int height,
+                                 int quality, int low_effort,
                                  VP8LBitWriter* const bw, int percent_range,
                                  int* const percent) {
-  const int ccolor_transform_bits = enc->transform_bits_;
-  const int transform_width = VP8LSubSampleSize(width, ccolor_transform_bits);
-  const int transform_height = VP8LSubSampleSize(height, ccolor_transform_bits);
+  const int min_bits = enc->cross_color_transform_bits_;
+  int best_bits;
 
-  if (!VP8LColorSpaceTransform(width, height, ccolor_transform_bits, quality,
-                               enc->argb_, enc->transform_data_, enc->pic_,
-                               percent_range / 2, percent)) {
+  if (!VP8LColorSpaceTransform(width, height, min_bits, quality, enc->argb_,
+                               enc->transform_data_, enc->pic_,
+                               percent_range / 2, percent, &best_bits)) {
     return 0;
   }
   VP8LPutBits(bw, TRANSFORM_PRESENT, 1);
   VP8LPutBits(bw, CROSS_COLOR_TRANSFORM, 2);
-  assert(ccolor_transform_bits >= 2);
-  VP8LPutBits(bw, ccolor_transform_bits - 2, 3);
+  assert(best_bits >= MIN_TRANSFORM_BITS && best_bits <= MAX_TRANSFORM_BITS);
+  VP8LPutBits(bw, best_bits - MIN_TRANSFORM_BITS, NUM_TRANSFORM_BITS);
+  enc->cross_color_transform_bits_ = best_bits;
   return EncodeImageNoHuffman(
-      bw, enc->transform_data_, (VP8LHashChain*)&enc->hash_chain_,
-      (VP8LBackwardRefs*)&enc->refs_[0], transform_width, transform_height,
+      bw, enc->transform_data_, &enc->hash_chain_, &enc->refs_[0],
+      VP8LSubSampleSize(width, best_bits), VP8LSubSampleSize(height, best_bits),
       quality, low_effort, enc->pic_, percent_range - percent_range / 2,
       percent);
 }
@@ -1197,10 +1201,14 @@ static int AllocateTransformBuffer(VP8LEncoder* const enc, int width,
       enc->use_predict_ ? (width + 1) * 2 + (width * 2 + sizeof(uint32_t) - 1) /
                                                 sizeof(uint32_t)
                         : 0;
+  const int min_transform_bits =
+      (enc->predictor_transform_bits_ < enc->cross_color_transform_bits_)
+          ? enc->predictor_transform_bits_
+          : enc->cross_color_transform_bits_;
   const uint64_t transform_data_size =
       (enc->use_predict_ || enc->use_cross_color_)
-          ? (uint64_t)VP8LSubSampleSize(width, enc->transform_bits_) *
-                VP8LSubSampleSize(height, enc->transform_bits_)
+          ? (uint64_t)VP8LSubSampleSize(width, min_transform_bits) *
+                VP8LSubSampleSize(height, min_transform_bits)
           : 0;
   const uint64_t max_alignment_in_words =
       (WEBP_ALIGN_CST + sizeof(uint32_t) - 1) / sizeof(uint32_t);
@@ -1625,7 +1633,8 @@ static int EncodeStreamHook(void* input, void* data2) {
         if (enc->use_subtract_green_) stats->lossless_features |= 4;
         if (enc->use_palette_) stats->lossless_features |= 8;
         stats->histogram_bits = enc->histo_bits_;
-        stats->transform_bits = enc->transform_bits_;
+        stats->transform_bits = enc->predictor_transform_bits_;
+        stats->cross_color_transform_bits = enc->cross_color_transform_bits_;
         stats->cache_bits = enc->cache_bits_;
         stats->palette_size = enc->palette_size_;
         stats->lossless_size = (int)(best_size - byte_position);
@@ -1735,7 +1744,10 @@ int VP8LEncodeStream(const WebPConfig* const config,
         }
         // Copy the values that were computed for the main encoder.
         enc_side->histo_bits_ = enc_main->histo_bits_;
-        enc_side->transform_bits_ = enc_main->transform_bits_;
+        enc_side->predictor_transform_bits_ =
+            enc_main->predictor_transform_bits_;
+        enc_side->cross_color_transform_bits_ =
+            enc_main->cross_color_transform_bits_;
         enc_side->palette_size_ = enc_main->palette_size_;
         memcpy(enc_side->palette_, enc_main->palette_,
                sizeof(enc_main->palette_));
