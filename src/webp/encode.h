@@ -79,6 +79,10 @@ WEBP_EXTERN size_t WebPEncodeLosslessBGRA(const uint8_t* bgra,
                                           int width, int height, int stride,
                                           uint8_t** output);
 
+WEBP_EXTERN size_t WebPEncodeLosslessQualityRGBA(const uint8_t* in,
+																					int width, int height, int stride,
+																					int quality, uint8_t** out);
+
 //------------------------------------------------------------------------------
 // Coding parameters
 

@@ -299,6 +299,10 @@ LOSSLESS_ENCODE_FUNC(WebPEncodeLosslessBGR, WebPPictureImportBGR)
 LOSSLESS_ENCODE_FUNC(WebPEncodeLosslessBGRA, WebPPictureImportBGRA)
 #endif  // WEBP_REDUCE_CSP
 
+size_t WebPEncodeLosslessQualityRGBA(const uint8_t* in, int w, int h, int bps, int quality, uint8_t** out) {
+	return Encode(in, w, h, bps, WebPPictureImportRGBA, quality, 1, out);
+}
+
 #undef LOSSLESS_ENCODE_FUNC
 
 //------------------------------------------------------------------------------
