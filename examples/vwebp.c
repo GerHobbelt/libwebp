@@ -622,7 +622,7 @@ int main(int argc, const char** argv)
 
   // Position iterator to last frame. Next call to HandleDisplay will wrap over.
   // We take this into account by bumping up loop_count.
-  WebPDemuxGetFrame(kParams.dmux, 0, curr);
+  if (!WebPDemuxGetFrame(kParams.dmux, 0, curr)) goto Error;
   if (kParams.loop_count) ++kParams.loop_count;
 
 #if defined(__unix__) || defined(__CYGWIN__)
