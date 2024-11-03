@@ -997,10 +997,10 @@ static void Intra4Preds_NEON(uint8_t* dst, const uint8_t* top) {
 
   sub = vsubl_u8(sub_c, sub_a);
   sum_lo = vaddw_u8(sub, vget_low_u8(full_b));
-  res_lo = vqmovn_u16(sum_lo);
+  res_lo = vqmovun_s16(vreinterpretq_s16_u16(sum_lo));
 
   sum_hi = vaddw_u8(sub, vget_high_u8(full_b));
-  res_hi = vqmovn_u16(sum_hi);
+  res_hi = vqmovun_s16(vreinterpretq_s16_u16(sum_hi));
 
   // DC4, VE4, HE4, TM4
   DC4_VE4_HE4_TM4_NEON(dst + I4DC4 + BPS * 0, lookup_avgs3.val[0], res_lo, 0);
@@ -1115,10 +1115,10 @@ static WEBP_INLINE void TrueMotionHelper_NEON(uint8_t* dst,
 
   r1 = vaddl_u8(outer, inner.val[0]);
   r1 = vqsubq_u16(r1, a);
-  d1 = vqmovn_u16(r1);
+  d1 = vqmovun_s16(vreinterpretq_s16_u16(r1));
   r2 = vaddl_u8(outer, inner.val[1]);
   r2 = vqsubq_u16(r2, a);
-  d2 = vqmovn_u16(r2);
+  d2 = vqmovun_s16(vreinterpretq_s16_u16(r2));
   vst1_u8(dst + BPS * (i * 4 + n), d1);
   vst1_u8(dst + BPS * (i * 4 + n) + 8, d2);
 }
