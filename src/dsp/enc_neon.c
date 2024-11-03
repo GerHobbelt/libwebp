@@ -927,6 +927,7 @@ static int Quantize2Blocks_NEON(int16_t in[32], int16_t out[32],
 
 #if WEBP_AARCH64
 
+#if BPS == 32
 #define DC4_VE4_HE4_TM4_NEON(dst, tbl, res, lane)                              \
   do {                                                                         \
     uint8x16_t r;                                                              \
@@ -1038,6 +1039,7 @@ static void Intra4Preds_NEON(uint8_t* WEBP_RESTRICT dst,
   vst1_u8(dst + I4HD4 + BPS * 2, vget_low_u8(result1));
   vst1_u8(dst + I4HD4 + BPS * 3, vget_high_u8(result1));
 }
+#endif  // BPS == 32
 
 static WEBP_INLINE void Fill_NEON(uint8_t* dst, const uint8_t value) {
   uint8x16_t a = vdupq_n_u8(value);

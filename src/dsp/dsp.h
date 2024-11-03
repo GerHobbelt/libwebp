@@ -285,10 +285,10 @@ void VP8DspInit(void);
 // Convert a pair of y/u/v lines together to the output rgb/a colorspace.
 // bottom_y can be NULL if only one line of output is needed (at top/bottom).
 typedef void (*WebPUpsampleLinePairFunc)(
-    const uint8_t* top_y, const uint8_t* bottom_y,
-    const uint8_t* top_u, const uint8_t* top_v,
-    const uint8_t* cur_u, const uint8_t* cur_v,
-    uint8_t* top_dst, uint8_t* bottom_dst, int len);
+    const uint8_t* WEBP_RESTRICT top_y, const uint8_t* WEBP_RESTRICT bottom_y,
+    const uint8_t* WEBP_RESTRICT top_u, const uint8_t* WEBP_RESTRICT top_v,
+    const uint8_t* WEBP_RESTRICT cur_u, const uint8_t* WEBP_RESTRICT cur_v,
+    uint8_t* WEBP_RESTRICT top_dst, uint8_t* WEBP_RESTRICT bottom_dst, int len);
 
 #ifdef FANCY_UPSAMPLING
 
@@ -298,13 +298,15 @@ extern WebPUpsampleLinePairFunc WebPUpsamplers[/* MODE_LAST */];
 #endif    // FANCY_UPSAMPLING
 
 // Per-row point-sampling methods.
-typedef void (*WebPSamplerRowFunc)(const uint8_t* y,
-                                   const uint8_t* u, const uint8_t* v,
-                                   uint8_t* dst, int len);
+typedef void (*WebPSamplerRowFunc)(const uint8_t* WEBP_RESTRICT y,
+                                   const uint8_t* WEBP_RESTRICT u,
+                                   const uint8_t* WEBP_RESTRICT v,
+                                   uint8_t* WEBP_RESTRICT dst, int len);
 // Generic function to apply 'WebPSamplerRowFunc' to the whole plane:
-void WebPSamplerProcessPlane(const uint8_t* y, int y_stride,
-                             const uint8_t* u, const uint8_t* v, int uv_stride,
-                             uint8_t* dst, int dst_stride,
+void WebPSamplerProcessPlane(const uint8_t* WEBP_RESTRICT y, int y_stride,
+                             const uint8_t* WEBP_RESTRICT u,
+                             const uint8_t* WEBP_RESTRICT v, int uv_stride,
+                             uint8_t* WEBP_RESTRICT dst, int dst_stride,
                              int width, int height, WebPSamplerRowFunc func);
 
 // Sampling functions to convert rows of YUV to RGB(A)
@@ -316,9 +318,10 @@ extern WebPSamplerRowFunc WebPSamplers[/* MODE_LAST */];
 WebPUpsampleLinePairFunc WebPGetLinePairConverter(int alpha_is_last);
 
 // YUV444->RGB converters
-typedef void (*WebPYUV444Converter)(const uint8_t* y,
-                                    const uint8_t* u, const uint8_t* v,
-                                    uint8_t* dst, int len);
+typedef void (*WebPYUV444Converter)(const uint8_t* WEBP_RESTRICT y,
+                                    const uint8_t* WEBP_RESTRICT u,
+                                    const uint8_t* WEBP_RESTRICT v,
+                                    uint8_t* WEBP_RESTRICT dst, int len);
 
 extern WebPYUV444Converter WebPYUV444Converters[/* MODE_LAST */];
 
@@ -334,26 +337,35 @@ void WebPInitYUV444Converters(void);
 // ARGB -> YUV converters
 
 // Convert ARGB samples to luma Y.
-extern void (*WebPConvertARGBToY)(const uint32_t* argb, uint8_t* y, int width);
+extern void (*WebPConvertARGBToY)(const uint32_t* WEBP_RESTRICT argb,
+                                  uint8_t* WEBP_RESTRICT y, int width);
 // Convert ARGB samples to U/V with downsampling. do_store should be '1' for
 // even lines and '0' for odd ones. 'src_width' is the original width, not
 // the U/V one.
-extern void (*WebPConvertARGBToUV)(const uint32_t* argb, uint8_t* u, uint8_t* v,
+extern void (*WebPConvertARGBToUV)(const uint32_t* WEBP_RESTRICT argb,
+                                   uint8_t* WEBP_RESTRICT u,
+                                   uint8_t* WEBP_RESTRICT v,
                                    int src_width, int do_store);
 
 // Convert a row of accumulated (four-values) of rgba32 toward U/V
-extern void (*WebPConvertRGBA32ToUV)(const uint16_t* rgb,
-                                     uint8_t* u, uint8_t* v, int width);
+extern void (*WebPConvertRGBA32ToUV)(const uint16_t* WEBP_RESTRICT rgb,
+                                     uint8_t* WEBP_RESTRICT u,
+                                     uint8_t* WEBP_RESTRICT v, int width);
 
 // Convert RGB or BGR to Y
-extern void (*WebPConvertRGB24ToY)(const uint8_t* rgb, uint8_t* y, int width);
-extern void (*WebPConvertBGR24ToY)(const uint8_t* bgr, uint8_t* y, int width);
+extern void (*WebPConvertRGB24ToY)(const uint8_t* WEBP_RESTRICT rgb,
+                                   uint8_t* WEBP_RESTRICT y, int width);
+extern void (*WebPConvertBGR24ToY)(const uint8_t* WEBP_RESTRICT bgr,
+                                   uint8_t* WEBP_RESTRICT y, int width);
 
 // used for plain-C fallback.
-extern void WebPConvertARGBToUV_C(const uint32_t* argb, uint8_t* u, uint8_t* v,
+extern void WebPConvertARGBToUV_C(const uint32_t* WEBP_RESTRICT argb,
+                                  uint8_t* WEBP_RESTRICT u,
+                                  uint8_t* WEBP_RESTRICT v,
                                   int src_width, int do_store);
-extern void WebPConvertRGBA32ToUV_C(const uint16_t* rgb,
-                                    uint8_t* u, uint8_t* v, int width);
+extern void WebPConvertRGBA32ToUV_C(const uint16_t* WEBP_RESTRICT rgb,
+                                    uint8_t* WEBP_RESTRICT u,
+                                    uint8_t* WEBP_RESTRICT v, int width);
 
 // Must be called before using the above.
 void WebPInitConvertARGBToYUV(void);
