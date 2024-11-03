@@ -31,6 +31,9 @@
 // Maximum number of histogram images (sub-blocks).
 #define MAX_HUFF_IMAGE_SIZE       2600
 #define MAX_HUFFMAN_BITS (MIN_HUFFMAN_BITS + (1 << NUM_HUFFMAN_BITS) - 1)
+// Empirical value for which it becomes too computationally expensive to
+// compute the best predictor image.
+#define MAX_PREDICTOR_IMAGE_SIZE (1 << 14)
 
 // -----------------------------------------------------------------------------
 // Palette
@@ -232,17 +235,33 @@ static int AnalyzeEntropy(const uint32_t* argb,
   }
 }
 
+// Clamp histogram and transform bits.
+static int ClampBits(int width, int height, int bits, int min_bits,
+                     int max_bits, int image_size_max) {
+  int image_size;
+  bits = (bits < min_bits) ? min_bits : (bits > max_bits) ? max_bits : bits;
+  image_size = VP8LSubSampleSize(width, bits) * VP8LSubSampleSize(height, bits);
+  while (bits < max_bits && image_size > image_size_max) {
+    ++bits;
+    image_size =
+        VP8LSubSampleSize(width, bits) * VP8LSubSampleSize(height, bits);
+  }
+  // In case the bits reduce the image too much, choose the smallest value
+  // setting the histogram image size to 1.
+  while (bits > min_bits && image_size == 1) {
+    image_size = VP8LSubSampleSize(width, bits - 1) *
+                 VP8LSubSampleSize(height, bits - 1);
+    if (image_size != 1) break;
+    --bits;
+  }
+  return bits;
+}
+
 static int GetHistoBits(int method, int use_palette, int width, int height) {
   // Make tile size a function of encoding method (Range: 0 to 6).
-  int histo_bits = (use_palette ? 9 : 7) - method;
-  while (1) {
-    const int huff_image_size = VP8LSubSampleSize(width, histo_bits) *
-                                VP8LSubSampleSize(height, histo_bits);
-    if (huff_image_size <= MAX_HUFF_IMAGE_SIZE) break;
-    ++histo_bits;
-  }
-  return (histo_bits < MIN_HUFFMAN_BITS) ? MIN_HUFFMAN_BITS :
-         (histo_bits > MAX_HUFFMAN_BITS) ? MAX_HUFFMAN_BITS : histo_bits;
+  const int histo_bits = (use_palette ? 9 : 7) - method;
+  return ClampBits(width, height, histo_bits, MIN_HUFFMAN_BITS,
+                   MAX_HUFFMAN_BITS, MAX_HUFF_IMAGE_SIZE);
 }
 
 static int GetTransformBits(int method, int histo_bits) {
@@ -664,11 +683,12 @@ static WEBP_INLINE void WriteHuffmanCodeWithExtraBits(
   VP8LPutBits(bw, (bits << depth) | symbol, depth + n_bits);
 }
 
-static int StoreImageToBitMask(
-    VP8LBitWriter* const bw, int width, int histo_bits,
-    const VP8LBackwardRefs* const refs,
-    const uint16_t* histogram_symbols,
-    const HuffmanTreeCode* const huffman_codes, const WebPPicture* const pic) {
+static int StoreImageToBitMask(VP8LBitWriter* const bw, int width,
+                               int histo_bits,
+                               const VP8LBackwardRefs* const refs,
+                               const uint32_t* histogram_symbols,
+                               const HuffmanTreeCode* const huffman_codes,
+                               const WebPPicture* const pic) {
   const int histo_xsize = histo_bits ? VP8LSubSampleSize(width, histo_bits) : 1;
   const int tile_mask = (histo_bits == 0) ? 0 : -(1 << histo_bits);
   // x and y trace the position in the image.
@@ -676,7 +696,7 @@ static int StoreImageToBitMask(
   int y = 0;
   int tile_x = x & tile_mask;
   int tile_y = y & tile_mask;
-  int histogram_ix = histogram_symbols[0];
+  int histogram_ix = (histogram_symbols[0] >> 8) & 0xffff;
   const HuffmanTreeCode* codes = huffman_codes + 5 * histogram_ix;
   VP8LRefsCursor c = VP8LRefsCursorInit(refs);
   while (VP8LRefsCursorOk(&c)) {
@@ -684,8 +704,10 @@ static int StoreImageToBitMask(
     if ((tile_x != (x & tile_mask)) || (tile_y != (y & tile_mask))) {
       tile_x = x & tile_mask;
       tile_y = y & tile_mask;
-      histogram_ix = histogram_symbols[(y >> histo_bits) * histo_xsize +
-                                       (x >> histo_bits)];
+      histogram_ix = (histogram_symbols[(y >> histo_bits) * histo_xsize +
+                                        (x >> histo_bits)] >>
+                      8) &
+                     0xffff;
       codes = huffman_codes + 5 * histogram_ix;
     }
     if (PixOrCopyIsLiteral(v)) {
@@ -741,7 +763,7 @@ static int EncodeImageNoHuffman(VP8LBitWriter* const bw,
   VP8LBackwardRefs* refs;
   HuffmanTreeToken* tokens = NULL;
   HuffmanTreeCode huffman_codes[5] = {{0, NULL, NULL}};
-  const uint16_t histogram_symbols[1] = {0};  // only one tree, one symbol
+  const uint32_t histogram_symbols[1] = {0};  // only one tree, one symbol
   int cache_bits = 0;
   VP8LHistogramSet* histogram_image = NULL;
   HuffmanTree* const huff_tree = (HuffmanTree*)WebPSafeMalloc(
@@ -824,32 +846,32 @@ static int EncodeImageInternal(
     VP8LBitWriter* const bw, const uint32_t* const argb,
     VP8LHashChain* const hash_chain, VP8LBackwardRefs refs_array[4], int width,
     int height, int quality, int low_effort, const CrunchConfig* const config,
-    int* cache_bits, int histogram_bits, size_t init_byte_position,
+    int* cache_bits, int histogram_bits_in, size_t init_byte_position,
     int* const hdr_size, int* const data_size, const WebPPicture* const pic,
     int percent_range, int* const percent) {
   const uint32_t histogram_image_xysize =
-      VP8LSubSampleSize(width, histogram_bits) *
-      VP8LSubSampleSize(height, histogram_bits);
+      VP8LSubSampleSize(width, histogram_bits_in) *
+      VP8LSubSampleSize(height, histogram_bits_in);
   int remaining_percent = percent_range;
   int percent_start = *percent;
   VP8LHistogramSet* histogram_image = NULL;
   VP8LHistogram* tmp_histo = NULL;
-  int histogram_image_size = 0;
+  uint32_t i, histogram_image_size = 0;
   size_t bit_array_size = 0;
   HuffmanTree* const huff_tree = (HuffmanTree*)WebPSafeMalloc(
       3ULL * CODE_LENGTH_CODES, sizeof(*huff_tree));
   HuffmanTreeToken* tokens = NULL;
   HuffmanTreeCode* huffman_codes = NULL;
-  uint16_t* const histogram_symbols = (uint16_t*)WebPSafeMalloc(
-      histogram_image_xysize, sizeof(*histogram_symbols));
+  uint32_t* const histogram_argb = (uint32_t*)WebPSafeMalloc(
+      histogram_image_xysize, sizeof(*histogram_argb));
   int sub_configs_idx;
   int cache_bits_init, write_histogram_image;
   VP8LBitWriter bw_init = *bw, bw_best;
   int hdr_size_tmp;
   VP8LHashChain hash_chain_histogram;  // histogram image hash chain
   size_t bw_size_best = ~(size_t)0;
-  assert(histogram_bits >= MIN_HUFFMAN_BITS);
-  assert(histogram_bits <= MAX_HUFFMAN_BITS);
+  assert(histogram_bits_in >= MIN_HUFFMAN_BITS);
+  assert(histogram_bits_in <= MAX_HUFFMAN_BITS);
   assert(hdr_size != NULL);
   assert(data_size != NULL);
 
@@ -860,7 +882,7 @@ static int EncodeImageInternal(
   }
 
   // Make sure we can allocate the different objects.
-  if (huff_tree == NULL || histogram_symbols == NULL ||
+  if (huff_tree == NULL || histogram_argb == NULL ||
       !VP8LHashChainInit(&hash_chain_histogram, histogram_image_xysize)) {
     WebPEncodingSetError(pic, VP8_ENC_ERROR_OUT_OF_MEMORY);
     goto Error;
@@ -902,6 +924,7 @@ static int EncodeImageInternal(
 
     for (i_cache = 0; i_cache < (sub_config->do_no_cache_ ? 2 : 1); ++i_cache) {
       const int cache_bits_tmp = (i_cache == 0) ? cache_bits_best : 0;
+      int histogram_bits = histogram_bits_in;
       // Speed-up: no need to study the no-cache case if it was already studied
       // in i_cache == 0.
       if (i_cache == 1 && cache_bits_best == 0) break;
@@ -923,7 +946,7 @@ static int EncodeImageInternal(
       if (!VP8LGetHistoImageSymbols(
               width, height, &refs_array[i_cache], quality, low_effort,
               histogram_bits, cache_bits_tmp, histogram_image, tmp_histo,
-              histogram_symbols, pic, i_percent_range, percent)) {
+              histogram_argb, pic, i_percent_range, percent)) {
         goto Error;
       }
       // Create Huffman bit lengths and codes for each histogram image.
@@ -956,26 +979,19 @@ static int EncodeImageInternal(
       }
 
       // Huffman image + meta huffman.
+      histogram_image_size = 0;
+      for (i = 0; i < histogram_image_xysize; ++i) {
+        if (histogram_argb[i] >= histogram_image_size) {
+          histogram_image_size = histogram_argb[i] + 1;
+        }
+        histogram_argb[i] <<= 8;
+      }
+
       write_histogram_image = (histogram_image_size > 1);
       VP8LPutBits(bw, write_histogram_image, 1);
       if (write_histogram_image) {
-        uint32_t* const histogram_argb = (uint32_t*)WebPSafeMalloc(
-            histogram_image_xysize, sizeof(*histogram_argb));
-        int max_index = 0;
-        uint32_t i;
-        if (histogram_argb == NULL) {
-          WebPEncodingSetError(pic, VP8_ENC_ERROR_OUT_OF_MEMORY);
-          goto Error;
-        }
-        for (i = 0; i < histogram_image_xysize; ++i) {
-          const int symbol_index = histogram_symbols[i] & 0xffff;
-          histogram_argb[i] = (symbol_index << 8);
-          if (symbol_index >= max_index) {
-            max_index = symbol_index + 1;
-          }
-        }
-        histogram_image_size = max_index;
-
+        VP8LOptimizeSampling(histogram_argb, width, height, histogram_bits_in,
+                             MAX_HUFFMAN_BITS, &histogram_bits);
         VP8LPutBits(bw, histogram_bits - 2, 3);
         i_percent_range = i_remaining_percent / 2;
         i_remaining_percent -= i_percent_range;
@@ -984,15 +1000,12 @@ static int EncodeImageInternal(
                 VP8LSubSampleSize(width, histogram_bits),
                 VP8LSubSampleSize(height, histogram_bits), quality, low_effort,
                 pic, i_percent_range, percent)) {
-          WebPSafeFree(histogram_argb);
           goto Error;
         }
-        WebPSafeFree(histogram_argb);
       }
 
       // Store Huffman codes.
       {
-        int i;
         int max_tokens = 0;
         // Find maximum number of symbols for the huffman tree-set.
         for (i = 0; i < 5 * histogram_image_size; ++i) {
@@ -1015,7 +1028,7 @@ static int EncodeImageInternal(
       // Store actual literals.
       hdr_size_tmp = (int)(VP8LBitWriterNumBytes(bw) - init_byte_position);
       if (!StoreImageToBitMask(bw, width, histogram_bits, &refs_array[i_cache],
-                               histogram_symbols, huffman_codes, pic)) {
+                               histogram_argb, huffman_codes, pic)) {
         goto Error;
       }
       // Keep track of the smallest image so far.
@@ -1052,7 +1065,7 @@ static int EncodeImageInternal(
     WebPSafeFree(huffman_codes->codes);
     WebPSafeFree(huffman_codes);
   }
-  WebPSafeFree(histogram_symbols);
+  WebPSafeFree(histogram_argb);
   VP8LBitWriterWipeOut(&bw_best);
   return (pic->error_code == VP8_ENC_OK);
 }
@@ -1071,14 +1084,19 @@ static int ApplyPredictFilter(VP8LEncoder* const enc, int width, int height,
                               int quality, int low_effort,
                               int used_subtract_green, VP8LBitWriter* const bw,
                               int percent_range, int* const percent) {
-  const int min_bits = enc->predictor_transform_bits_;
   int best_bits;
-  // we disable near-lossless quantization if palette is used.
   const int near_lossless_strength =
       enc->use_palette_ ? 100 : enc->config_->near_lossless;
+  const int max_bits = ClampBits(width, height, enc->predictor_transform_bits_,
+                                 MIN_TRANSFORM_BITS, MAX_TRANSFORM_BITS,
+                                 MAX_PREDICTOR_IMAGE_SIZE);
+  const int min_bits = ClampBits(
+      width, height,
+      max_bits - 2 * (enc->config_->method > 4 ? enc->config_->method - 4 : 0),
+      MIN_TRANSFORM_BITS, MAX_TRANSFORM_BITS, MAX_PREDICTOR_IMAGE_SIZE);
 
-  if (!VP8LResidualImage(width, height, min_bits, low_effort, enc->argb_,
-                         enc->argb_scratch_, enc->transform_data_,
+  if (!VP8LResidualImage(width, height, min_bits, max_bits, low_effort,
+                         enc->argb_, enc->argb_scratch_, enc->transform_data_,
                          near_lossless_strength, enc->config_->exact,
                          used_subtract_green, enc->pic_, percent_range / 2,
                          percent, &best_bits)) {
@@ -1201,14 +1219,10 @@ static int AllocateTransformBuffer(VP8LEncoder* const enc, int width,
       enc->use_predict_ ? (width + 1) * 2 + (width * 2 + sizeof(uint32_t) - 1) /
                                                 sizeof(uint32_t)
                         : 0;
-  const int min_transform_bits =
-      (enc->predictor_transform_bits_ < enc->cross_color_transform_bits_)
-          ? enc->predictor_transform_bits_
-          : enc->cross_color_transform_bits_;
   const uint64_t transform_data_size =
       (enc->use_predict_ || enc->use_cross_color_)
-          ? (uint64_t)VP8LSubSampleSize(width, min_transform_bits) *
-                VP8LSubSampleSize(height, min_transform_bits)
+          ? (uint64_t)VP8LSubSampleSize(width, MIN_TRANSFORM_BITS) *
+                VP8LSubSampleSize(height, MIN_TRANSFORM_BITS)
           : 0;
   const uint64_t max_alignment_in_words =
       (WEBP_ALIGN_CST + sizeof(uint32_t) - 1) / sizeof(uint32_t);
