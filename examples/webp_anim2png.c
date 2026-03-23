@@ -115,7 +115,8 @@ static int BenchmarkDecodeOnly(const WebPData* const webp_data) {
 }
 
 // One BMP per frame (headers include size) for: ffmpeg -f image2pipe -i - ...
-static int StreamBmpForFfmpeg(const WebPData* const webp_data) {
+// Does not set stdout binary mode or print the ffmpeg hint (caller does once).
+static int StreamBmpFramesForFfmpeg(const WebPData* const webp_data) {
   WebPAnimDecoderOptions dec_options;
   WebPAnimDecoder* dec = NULL;
   WebPAnimInfo anim_info;
@@ -134,16 +135,6 @@ static int StreamBmpForFfmpeg(const WebPData* const webp_data) {
   }
   if (!WebPAnimDecoderGetInfo(dec, &anim_info)) {
     fprintf(stderr, "WebPAnimDecoderGetInfo failed.\n");
-    WebPAnimDecoderDelete(dec);
-    return 0;
-  }
-
-  fprintf(stderr,
-          "BMP sequence on stdout. Example: ffmpeg -f image2pipe -framerate "
-          "30 -i - -c:v libx264 -pix_fmt yuv420p out.mp4\n");
-  fflush(stderr);
-
-  if (ImgIoUtilSetBinaryMode(stdout) == NULL) {
     WebPAnimDecoderDelete(dec);
     return 0;
   }
@@ -234,13 +225,13 @@ static void PrintUsage(void) {
   printf("Usage: webp_anim2png <animated.webp>\n");
   printf(
       "       webp_anim2png --decode-only <animated.webp>\n"
-      "       webp_anim2png --ffmpeg-bmp <animated.webp>\n"
+      "       webp_anim2png --ffmpeg-bmp <animated.webp> [<animated.webp> ...]\n"
       "Creates a folder with the same base name as the file (without "
       "extension)\n"
       "and saves each decoded frame as PNG (0000.png, 0001.png, ...).\n"
       "--decode-only decodes to memory only and prints timing (no PNG files).\n"
       "--ffmpeg-bmp writes one BMP per frame to stdout for ffmpeg -f image2pipe "
-      "(alias: --ffmpeg-raw).\n");
+      "(alias: --ffmpeg-raw). Multiple inputs are concatenated in file order.\n");
 }
 
 int main(int argc, const char* argv[]) {
@@ -251,14 +242,29 @@ int main(int argc, const char* argv[]) {
 
   INIT_WARGV(argc, argv);
 
-  if (argc == 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "-help"))) {
+  if (argc < 2) {
+    PrintUsage();
+    FREE_WARGV_AND_RETURN(EXIT_FAILURE);
+  }
+  if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "-help")) {
+    if (argc != 2) {
+      PrintUsage();
+      FREE_WARGV_AND_RETURN(EXIT_FAILURE);
+    }
     PrintUsage();
     FREE_WARGV_AND_RETURN(EXIT_SUCCESS);
   }
-  if (argc != 2 &&
-      (argc != 3 ||
-       (strcmp(argv[1], "--decode-only") != 0 &&
-        !IsFfmpegBmpPipeArg(argv[1])))) {
+  if (!strcmp(argv[1], "--decode-only")) {
+    if (argc != 3) {
+      PrintUsage();
+      FREE_WARGV_AND_RETURN(EXIT_FAILURE);
+    }
+  } else if (IsFfmpegBmpPipeArg(argv[1])) {
+    if (argc < 3) {
+      PrintUsage();
+      FREE_WARGV_AND_RETURN(EXIT_FAILURE);
+    }
+  } else if (argc != 2) {
     PrintUsage();
     FREE_WARGV_AND_RETURN(EXIT_FAILURE);
   }
@@ -268,11 +274,43 @@ int main(int argc, const char* argv[]) {
   {
     const int decode_only =
         (argc == 3 && !strcmp(argv[1], "--decode-only"));
-    const int ffmpeg_bmp = (argc == 3 && IsFfmpegBmpPipeArg(argv[1]));
-    const int arg_input = (argc == 3) ? 2 : 1;
+    const int ffmpeg_bmp = IsFfmpegBmpPipeArg(argv[1]);
+    const int arg_input = (argc >= 3 && !ffmpeg_bmp) ? 2 : 1;
     WebPAnimDecoderOptions dec_options;
     const W_CHAR* const in_path = GET_WARGV(argv, arg_input);
     W_CHAR folder_path[1024];
+
+    if (ffmpeg_bmp) {
+      fprintf(stderr,
+              "BMP sequence on stdout. Example: ffmpeg -f image2pipe "
+              "-framerate "
+              "30 -i - -c:v libx264 -pix_fmt yuv420p out.mp4\n");
+      fflush(stderr);
+      if (ImgIoUtilSetBinaryMode(stdout) == NULL) {
+        goto End;
+      }
+      {
+        int arg_i;
+        for (arg_i = 2; arg_i < argc; ++arg_i) {
+          const W_CHAR* const in_path_ff = GET_WARGV(argv, arg_i);
+          WebPDataClear(&webp_data);
+          WebPDataInit(&webp_data);
+          if (!ImgIoUtilReadFile((const char*)in_path_ff, &webp_data.bytes,
+                                 &webp_data.size)) {
+            goto End;
+          }
+          if (!WebPGetInfo(webp_data.bytes, webp_data.size, NULL, NULL)) {
+            WFPRINTF(stderr, "Not a WebP file: %s\n", in_path_ff);
+            goto End;
+          }
+          if (!StreamBmpFramesForFfmpeg(&webp_data)) {
+            goto End;
+          }
+        }
+      }
+      exit_code = EXIT_SUCCESS;
+      goto End;
+    }
 
     if (WSTRLEN(in_path) + 1 > sizeof(folder_path) / sizeof(folder_path[0])) {
       WFPRINTF(stderr, "Path too long: %s\n", in_path);
@@ -281,7 +319,7 @@ int main(int argc, const char* argv[]) {
     memcpy(folder_path, in_path,
            (WSTRLEN(in_path) + 1) * sizeof(W_CHAR));
 
-    if (!decode_only && !ffmpeg_bmp) {
+    if (!decode_only) {
       if (!StripFileExtension(folder_path)) {
         WFPRINTF(stderr,
                  "Could not derive output folder name from: %s\n"
@@ -303,14 +341,6 @@ int main(int argc, const char* argv[]) {
 
     if (decode_only) {
       if (!BenchmarkDecodeOnly(&webp_data)) {
-        goto End;
-      }
-      exit_code = EXIT_SUCCESS;
-      goto End;
-    }
-
-    if (ffmpeg_bmp) {
-      if (!StreamBmpForFfmpeg(&webp_data)) {
         goto End;
       }
       exit_code = EXIT_SUCCESS;
