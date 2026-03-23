@@ -55,3 +55,5 @@ tests/fuzzer/enc_dec_fuzzer
 tests/fuzzer/huffman_fuzzer
 tests/fuzzer/mux_demux_api_fuzzer
 tests/fuzzer/simple_api_fuzzer
+.vs
+/out

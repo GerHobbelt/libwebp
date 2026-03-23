@@ -161,6 +161,7 @@ CFLAGS = $(CFLAGS) /D_UNICODE /DUNICODE
 !MESSAGE - gif2webp                       - requires libgif & >= VS2013
 !MESSAGE - anim_diff                      - requires libgif & >= VS2013
 !MESSAGE - anim_dump
+!MESSAGE - webp_anim2png
 !MESSAGE
 !MESSAGE RTLIBCFG controls the runtime library linkage - 'static' or 'dynamic'.
 !MESSAGE   'legacy' will produce a Windows 2000 compatible library.
@@ -378,6 +379,7 @@ all: ex $(EXTRA_EXAMPLES)
 gif2webp: $(DIRBIN)\gif2webp.exe
 anim_diff: $(DIRBIN)\anim_diff.exe
 anim_dump: $(DIRBIN)\anim_dump.exe
+webp_anim2png: $(DIRBIN)\webp_anim2png.exe
 
 $(DIRBIN)\anim_diff.exe: $(DIROBJ)\examples\anim_diff.obj $(EX_ANIM_UTIL_OBJS)
 $(DIRBIN)\anim_diff.exe: $(EX_UTIL_OBJS) $(IMAGEIO_UTIL_OBJS)
@@ -386,6 +388,9 @@ $(DIRBIN)\anim_dump.exe: $(DIROBJ)\examples\anim_dump.obj $(EX_ANIM_UTIL_OBJS)
 $(DIRBIN)\anim_dump.exe: $(EX_UTIL_OBJS) $(IMAGEIO_UTIL_OBJS)
 $(DIRBIN)\anim_dump.exe: $(EX_GIF_DEC_OBJS) $(LIBWEBPDEMUX) $(LIBWEBP)
 $(DIRBIN)\anim_dump.exe: $(IMAGEIO_ENC_OBJS)
+$(DIRBIN)\webp_anim2png.exe: $(DIROBJ)\examples\webp_anim2png.obj
+$(DIRBIN)\webp_anim2png.exe: $(EX_UTIL_OBJS) $(IMAGEIO_UTIL_OBJS)
+$(DIRBIN)\webp_anim2png.exe: $(IMAGEIO_ENC_OBJS) $(LIBWEBPDEMUX) $(LIBWEBP)
 $(DIRBIN)\cwebp.exe: $(DIROBJ)\examples\cwebp.obj $(IMAGEIO_DEC_OBJS)
 $(DIRBIN)\cwebp.exe: $(IMAGEIO_UTIL_OBJS)
 $(DIRBIN)\cwebp.exe: $(LIBWEBPDEMUX) $(LIBSHARPYUV)

@@ -42,6 +42,15 @@ option(WEBP_BUILD_WEBPMUX "Build the webpmux command line tool." ON)
 option(WEBP_BUILD_EXTRAS "Build extras." ON)
 option(WEBP_BUILD_WEBP_JS "Emscripten build of webp.js." OFF)
 option(WEBP_BUILD_FUZZTEST "Build the fuzztest tests." OFF)
+if(WIN32)
+  set(WEBP_BUILD_WEBP_ANIM2PNG_DEFAULT ON)
+else()
+  set(WEBP_BUILD_WEBP_ANIM2PNG_DEFAULT OFF)
+endif()
+option(
+  WEBP_BUILD_WEBP_ANIM2PNG
+  "Build webp_anim2png (decode animated WebP to PNG frames per folder; full tool on Windows)."
+  ${WEBP_BUILD_WEBP_ANIM2PNG_DEFAULT})
 option(WEBP_USE_THREAD "Enable threading support" ON)
 option(WEBP_NEAR_LOSSLESS "Enable near-lossless encoding" ON)
 option(WEBP_ENABLE_SWAP_16BIT_CSP "Enable byte swap for 16 bit colorspaces."
@@ -82,6 +91,7 @@ if(WEBP_BUILD_WEBP_JS)
   set(WEBP_BUILD_WEBPINFO OFF)
   set(WEBP_BUILD_WEBPMUX OFF)
   set(WEBP_BUILD_EXTRAS OFF)
+  set(WEBP_BUILD_WEBP_ANIM2PNG OFF)
   set(WEBP_USE_THREAD OFF)
 
   if(WEBP_ENABLE_SIMD)
@@ -115,7 +125,8 @@ if(WEBP_BUILD_ANIM_UTILS
    OR WEBP_BUILD_DWEBP
    OR WEBP_BUILD_EXTRAS
    OR WEBP_BUILD_GIF2WEBP
-   OR WEBP_BUILD_IMG2WEBP)
+   OR WEBP_BUILD_IMG2WEBP
+   OR WEBP_BUILD_WEBP_ANIM2PNG)
   set(WEBP_FIND_IMG_LIBS TRUE)
 else()
   set(WEBP_FIND_IMG_LIBS FALSE)
@@ -510,6 +521,7 @@ if(WEBP_BUILD_ANIM_UTILS
    OR WEBP_BUILD_GIF2WEBP
    OR WEBP_BUILD_IMG2WEBP
    OR WEBP_BUILD_VWEBP
+   OR WEBP_BUILD_WEBP_ANIM2PNG
    OR WEBP_BUILD_WEBPMUX
    OR WEBP_BUILD_WEBPINFO)
   # Example utility library.
@@ -552,6 +564,13 @@ if(WEBP_BUILD_DWEBP)
   target_link_libraries(dwebp exampleutil imagedec imageenc)
   target_include_directories(dwebp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
   install(TARGETS dwebp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
+if(WEBP_BUILD_WEBP_ANIM2PNG)
+  add_executable(webp_anim2png ${CMAKE_CURRENT_SOURCE_DIR}/examples/webp_anim2png.c)
+  target_link_libraries(webp_anim2png exampleutil imageenc imageioutil webp webpdemux)
+  target_include_directories(webp_anim2png PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  install(TARGETS webp_anim2png RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 if(WEBP_BUILD_CWEBP)
