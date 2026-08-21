@@ -178,7 +178,7 @@ static int AndroidCPUInfo(CPUFeature feature) {
   return 0;
 }
 static VP8CPUInfo VP8GetCPUInfo = AndroidCPUInfo;
-#elif defined(EMSCRIPTEN)         // also needs to be before generic NEON test
+#elif defined(__EMSCRIPTEN__)     // also needs to be before generic NEON test
 // Use compile flags as an indicator of SIMD support instead of a runtime check.
 static int wasmCPUInfo(CPUFeature feature) {
   switch (feature) {
