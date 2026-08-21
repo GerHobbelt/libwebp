@@ -152,21 +152,40 @@ static void ImportOneRow(const uint8_t* const r_ptr, const uint8_t* const g_ptr,
   // Convert the rgb_step from a number of bytes to a number of uint8_t or
   // uint16_t values depending the bit depth.
   const int step = (rgb_bit_depth > 8) ? rgb_step / 2 : rgb_step;
-  int i = 0;
   const int w = (pic_width + 1) & ~1;
-  do {
-    const int off = i * step;
-    const int shift = GetPrecisionShift(rgb_bit_depth);
-    if (rgb_bit_depth == 8) {
+  const int shift = GetPrecisionShift(rgb_bit_depth);
+  const int max_val = (1 << rgb_bit_depth) - 1;
+  int i = 0;
+
+  if (rgb_bit_depth == 8) {
+    do {
+      const int off = i * step;
       dst[i + 0 * w] = Shift(r_ptr[off], shift);
       dst[i + 1 * w] = Shift(g_ptr[off], shift);
       dst[i + 2 * w] = Shift(b_ptr[off], shift);
-    } else {
-      dst[i + 0 * w] = Shift(((uint16_t*)r_ptr)[off], shift);
-      dst[i + 1 * w] = Shift(((uint16_t*)g_ptr)[off], shift);
-      dst[i + 2 * w] = Shift(((uint16_t*)b_ptr)[off], shift);
-    }
-  } while (++i < pic_width);
+    } while (++i < pic_width);
+  } else if (rgb_bit_depth < 16) {
+    do {
+      const int off = i * step;
+      int r = ((const uint16_t*)r_ptr)[off];
+      int g = ((const uint16_t*)g_ptr)[off];
+      int b = ((const uint16_t*)b_ptr)[off];
+      dst[i + 0 * w] = Shift(r > max_val ? max_val : r, shift);
+      dst[i + 1 * w] = Shift(g > max_val ? max_val : g, shift);
+      dst[i + 2 * w] = Shift(b > max_val ? max_val : b, shift);
+    } while (++i < pic_width);
+  } else {  // rgb_bit_depth == 16
+    do {
+      const int off = i * step;
+      int r = ((const uint16_t*)r_ptr)[off];
+      int g = ((const uint16_t*)g_ptr)[off];
+      int b = ((const uint16_t*)b_ptr)[off];
+      dst[i + 0 * w] = Shift(r, shift);
+      dst[i + 1 * w] = Shift(g, shift);
+      dst[i + 2 * w] = Shift(b, shift);
+    } while (++i < pic_width);
+  }
+
   if (pic_width & 1) {  // replicate rightmost pixel
     dst[pic_width + 0 * w] = dst[pic_width + 0 * w - 1];
     dst[pic_width + 1 * w] = dst[pic_width + 1 * w - 1];
@@ -208,10 +227,10 @@ static void InterpolateTwoRows(const fixed_y_t* const best_y,
 
 static WEBP_INLINE int RGBToYUVComponent(int r, int g, int b,
                                          const int coeffs[4], int sfix) {
-  const int srounder = 1 << (YUV_FIX + sfix - 1);
-  const int luma =
-      coeffs[0] * r + coeffs[1] * g + coeffs[2] * b + coeffs[3] + srounder;
-  return (luma >> (YUV_FIX + sfix));
+  const int64_t srounder = 1LL << (YUV_FIX + sfix - 1);
+  const int64_t luma = (int64_t)coeffs[0] * r + (int64_t)coeffs[1] * g +
+                       (int64_t)coeffs[2] * b + coeffs[3] + srounder;
+  return (int)(luma >> (YUV_FIX + sfix));
 }
 
 static int ConvertWRGBToYUV(const fixed_y_t* best_y, const fixed_t* best_uv,
