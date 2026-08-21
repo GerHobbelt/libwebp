@@ -14,7 +14,10 @@
 #ifndef WEBP_UTILS_HUFFMAN_ENCODE_UTILS_H_
 #define WEBP_UTILS_HUFFMAN_ENCODE_UTILS_H_
 
+#include "src/utils/bounds_safety.h"
 #include "src/webp/types.h"
+
+WEBP_ASSUME_UNSAFE_INDEXABLE_ABI
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,9 +31,11 @@ typedef struct {
 
 // Struct to represent the tree codes (depth and bits array).
 typedef struct {
-  int num_symbols;        // Number of symbols.
-  uint8_t* code_lengths;  // Code lengths of the symbols.
-  uint16_t* codes;        // Symbol Codes.
+  int num_symbols;  // Number of symbols.
+  // Code lengths of the symbols.
+  uint8_t* WEBP_COUNTED_BY(num_symbols) code_lengths;
+  // Symbol Codes.
+  uint16_t* WEBP_COUNTED_BY(num_symbols) codes;
 } HuffmanTreeCode;
 
 // Struct to represent the Huffman tree.

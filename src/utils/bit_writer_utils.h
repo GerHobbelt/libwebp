@@ -16,7 +16,10 @@
 
 #include <stddef.h>
 
+#include "src/utils/bounds_safety.h"
 #include "src/webp/types.h"
+
+WEBP_ASSUME_UNSAFE_INDEXABLE_ABI
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,9 +32,10 @@ typedef struct VP8BitWriter VP8BitWriter;
 struct VP8BitWriter {
   int32_t range;  // range-1
   int32_t value;
-  int run;       // number of outstanding bits
-  int nb_bits;   // number of pending bits
-  uint8_t* buf;  // internal buffer. Re-allocated regularly. Not owned.
+  int run;      // number of outstanding bits
+  int nb_bits;  // number of pending bits
+  // internal buffer. Re-allocated regularly. Not owned.
+  uint8_t* WEBP_SIZED_BY_OR_NULL(max_pos) buf;
   size_t pos;
   size_t max_pos;
   int error;  // true in case of error
