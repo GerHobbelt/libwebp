@@ -244,6 +244,17 @@ static int mipsCPUInfo(CPUFeature feature) {
   }
 }
 static VP8CPUInfo VP8GetCPUInfo = mipsCPUInfo;
+#elif defined(WEBP_USE_VSX)
+// VSX is the POWER8 (ISA 2.07) baseline, so compile-time presence implies
+// runtime availability.
+static int ppcCPUInfo(CPUFeature feature) {
+  if (feature == kVSX) {
+    return 1;
+  } else {
+    return 0;
+  }
+}
+static VP8CPUInfo VP8GetCPUInfo = ppcCPUInfo;
 #else
 static VP8CPUInfo VP8GetCPUInfo = NULL;
 #endif
