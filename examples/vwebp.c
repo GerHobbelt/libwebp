@@ -587,7 +587,7 @@ int main(int argc, const char** argv)
   if (kParams.file_name == NULL) {
     printf("missing input file!!\n");
     Help();
-    FREE_WARGV_AND_RETURN(EXIT_SUCCESS);
+    FREE_WARGV_AND_RETURN(EXIT_FAILURE);
   }
 
   if (!ImgIoUtilReadFile(kParams.file_name,

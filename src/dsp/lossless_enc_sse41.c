@@ -14,9 +14,13 @@
 #include "src/dsp/dsp.h"
 
 #if defined(WEBP_USE_SSE41)
+
 #include <assert.h>
 #include <smmintrin.h>
+
+#include "src/dsp/cpu.h"
 #include "src/dsp/lossless.h"
+#include "src/webp/types.h"
 
 //------------------------------------------------------------------------------
 // Cost operations.
@@ -199,6 +203,11 @@ WEBP_TSAN_IGNORE_FUNCTION void VP8LEncDspInitSSE41(void) {
   VP8LSubtractGreenFromBlueAndRed = SubtractGreenFromBlueAndRed_SSE41;
   VP8LCollectColorBlueTransforms = CollectColorBlueTransforms_SSE41;
   VP8LCollectColorRedTransforms = CollectColorRedTransforms_SSE41;
+
+  // SSE exports for AVX and above.
+  VP8LSubtractGreenFromBlueAndRed_SSE = SubtractGreenFromBlueAndRed_SSE41;
+  VP8LCollectColorBlueTransforms_SSE = CollectColorBlueTransforms_SSE41;
+  VP8LCollectColorRedTransforms_SSE = CollectColorRedTransforms_SSE41;
 }
 
 #else  // !WEBP_USE_SSE41

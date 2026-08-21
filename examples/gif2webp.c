@@ -81,7 +81,8 @@ static void Help(void) {
                                     "conversion\n"
          "                           (lossy only)\n");
   printf("  -q <float> ............. quality factor (0:small..100:big)\n");
-  printf("  -m <int> ............... compression method (0=fast, 6=slowest)\n");
+  printf("  -m <int> ............... compression method (0=fast, 6=slowest), "
+         "default=4\n");
   printf("  -min_size .............. minimize output size (default:off)\n"
          "                           lossless compression by default; can be\n"
          "                           combined with -q, -m, -lossy or -mixed\n"
@@ -165,7 +166,7 @@ int main(int argc, const char** argv)
 
   if (argc == 1) {
     Help();
-    FREE_WARGV_AND_RETURN(EXIT_SUCCESS);
+    FREE_WARGV_AND_RETURN(EXIT_FAILURE);
   }
 
   for (c = 1; c < argc; ++c) {
