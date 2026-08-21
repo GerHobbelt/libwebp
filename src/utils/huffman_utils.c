@@ -68,8 +68,9 @@ static WEBP_INLINE void ReplicateValue(HuffmanCode* table, int step, int end,
 // Returns the table width of the next 2nd level table. count is the histogram
 // of bit lengths for the remaining symbols, len is the code length of the next
 // processed symbol
-static WEBP_INLINE int NextTableBitSize(const int* const count, int len,
-                                        int root_bits) {
+static WEBP_INLINE int NextTableBitSize(
+    const int* const WEBP_COUNTED_BY(MAX_ALLOWED_CODE_LENGTH + 1) count,
+    int len, int root_bits) {
   int left = 1 << (len - root_bits);
   while (len < MAX_ALLOWED_CODE_LENGTH) {
     left -= count[len];
@@ -227,7 +228,9 @@ static int BuildHuffmanTable(HuffmanCode* const root_table, int root_bits,
 // Cut-off value for switching between heap and stack allocation.
 #define SORTED_SIZE_CUTOFF 512
 int VP8LBuildHuffmanTable(HuffmanTables* const root_table, int root_bits,
-                          const int code_lengths[], int code_lengths_size) {
+                          const int WEBP_COUNTED_BY(code_lengths_size)
+                              code_lengths[],
+                          int code_lengths_size) {
   const int total_size =
       BuildHuffmanTable(NULL, root_bits, code_lengths, code_lengths_size, NULL);
   assert(code_lengths_size <= MAX_CODE_LENGTHS_SIZE);
