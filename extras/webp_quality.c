@@ -12,9 +12,9 @@
 #include <string.h>
 
 #include "../examples/unicode.h"
-#include "src/webp/types.h"
 #include "extras/extras.h"
 #include "imageio/imageio_util.h"
+#include "src/webp/types.h"
 
 #ifdef BUILD_MONOLITHIC
 #include "extras/tools.h"
@@ -55,7 +55,7 @@ int main(int argc, const char** argv)
         if (!quiet) {
           printf("Estimated quality factor: %d\n", q);
         } else {
-          printf("%d\n", q);   // just print the number
+          printf("%d\n", q);  // just print the number
         }
       }
       free((void*)data);
