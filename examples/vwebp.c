@@ -29,6 +29,12 @@
 
 #if defined(WEBP_HAVE_GL)
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+// Windows Kits\10\Include\10.0.26100.0\um\GL\glu.h(235,36): warning C4255: 'fn': no function prototype given: converting '()' to '(void)'
+#pragma warning(disable : 4255)
+#endif
+
 #if defined(HAVE_GLUT_GLUT_H)
 #include <GLUT/glut.h>
 #else
@@ -36,6 +42,10 @@
 #ifdef FREEGLUT
 #include <GL/freeglut.h>
 #endif
+#endif
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
 #endif
 
 #ifdef WEBP_HAVE_QCMS
