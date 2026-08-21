@@ -26,8 +26,8 @@
 #include "../examples/unicode.h"
 #include "imageio/image_dec.h"
 #include "imageio/imageio_util.h"
-#include "src/webp/types.h"
 #include "webp/encode.h"
+#include "webp/types.h"
 
 #ifdef BUILD_MONOLITHIC
 #include "extras/tools.h"

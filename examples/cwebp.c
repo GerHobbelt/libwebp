@@ -27,10 +27,10 @@
 #include "extras/tools.h"
 #endif
 
-#include "../examples/example_util.h"
 #include "../imageio/image_dec.h"
 #include "../imageio/imageio_util.h"
 #include "../imageio/webpdec.h"
+#include "./example_util.h"
 #include "./stopwatch.h"
 #include "./unicode.h"
 #include "imageio/metadata.h"
