@@ -23,10 +23,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "webp/encode.h"
+#include "../examples/unicode.h"
 #include "imageio/image_dec.h"
 #include "imageio/imageio_util.h"
-#include "../examples/unicode.h"
+#include "src/webp/types.h"
+#include "webp/encode.h"
 
 #ifdef BUILD_MONOLITHIC
 #include "extras/tools.h"

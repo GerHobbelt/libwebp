@@ -15,12 +15,9 @@
 #ifndef WEBP_DSP_LOSSLESS_H_
 #define WEBP_DSP_LOSSLESS_H_
 
+#include "src/dsp/dsp.h"
 #include "src/webp/types.h"
 #include "src/webp/decode.h"
-
-#include "src/dsp/dsp.h"
-#include "src/enc/histogram_enc.h"
-#include "src/utils/utils.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,9 +71,9 @@ extern VP8LProcessDecBlueAndRedFunc VP8LAddGreenToBlueAndRed_SSE;
 typedef struct {
   // Note: the members are uint8_t, so that any negative values are
   // automatically converted to "mod 256" values.
-  uint8_t green_to_red_;
-  uint8_t green_to_blue_;
-  uint8_t red_to_blue_;
+  uint8_t green_to_red;
+  uint8_t green_to_blue;
+  uint8_t red_to_blue;
 } VP8LMultipliers;
 typedef void (*VP8LTransformColorInverseFunc)(const VP8LMultipliers* const m,
                                               const uint32_t* src,
@@ -196,15 +193,11 @@ extern VP8LPredictorAddSubFunc VP8LPredictorsSub_SSE[16];
 // Huffman-cost related functions.
 
 typedef uint32_t (*VP8LCostFunc)(const uint32_t* population, int length);
-typedef uint32_t (*VP8LCostCombinedFunc)(const uint32_t* WEBP_RESTRICT X,
-                                         const uint32_t* WEBP_RESTRICT Y,
-                                         int length);
 typedef uint64_t (*VP8LCombinedShannonEntropyFunc)(const uint32_t X[256],
                                                    const uint32_t Y[256]);
 typedef uint64_t (*VP8LShannonEntropyFunc)(const uint32_t* X, int length);
 
 extern VP8LCostFunc VP8LExtraCost;
-extern VP8LCostCombinedFunc VP8LExtraCostCombined;
 extern VP8LCombinedShannonEntropyFunc VP8LCombinedShannonEntropy;
 extern VP8LShannonEntropyFunc VP8LShannonEntropy;
 
@@ -249,9 +242,6 @@ extern VP8LAddVectorFunc VP8LAddVector;
 typedef void (*VP8LAddVectorEqFunc)(const uint32_t* WEBP_RESTRICT a,
                                     uint32_t* WEBP_RESTRICT out, int size);
 extern VP8LAddVectorEqFunc VP8LAddVectorEq;
-void VP8LHistogramAdd(const VP8LHistogram* WEBP_RESTRICT const a,
-                      const VP8LHistogram* WEBP_RESTRICT const b,
-                      VP8LHistogram* WEBP_RESTRICT const out);
 
 // -----------------------------------------------------------------------------
 // PrefixEncode()

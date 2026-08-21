@@ -11,9 +11,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../examples/unicode.h"
+#include "src/webp/types.h"
 #include "extras/extras.h"
 #include "imageio/imageio_util.h"
-#include "../examples/unicode.h"
 
 #ifdef BUILD_MONOLITHIC
 #include "extras/tools.h"

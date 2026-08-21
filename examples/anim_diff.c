@@ -22,6 +22,7 @@
 #include "./anim_util.h"
 #include "./example_util.h"
 #include "./unicode.h"
+#include "webp/types.h"
 
 #ifdef BUILD_MONOLITHIC
 #include "extras/tools.h"

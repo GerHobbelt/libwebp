@@ -14,12 +14,18 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdlib.h>
+#include <string.h>
 
+#include "src/dec/vp8_dec.h"
+#include "src/webp/types.h"
 #include "src/dec/vp8i_dec.h"
 #include "src/dec/webpi_dec.h"
+#include "src/dsp/cpu.h"
 #include "src/dsp/dsp.h"
 #include "src/dsp/yuv.h"
+#include "src/utils/rescaler_utils.h"
 #include "src/utils/utils.h"
+#include "src/webp/decode.h"
 
 //------------------------------------------------------------------------------
 // Main YUV<->RGB conversion functions
@@ -259,7 +265,7 @@ static int EmitRescaledYUV(const VP8Io* const io, WebPDecParams* const p) {
   if (WebPIsAlphaMode(p->output->colorspace) && io->a != NULL) {
     // Before rescaling, we premultiply the luma directly into the io->y
     // internal buffer. This is OK since these samples are not used for
-    // intra-prediction (the top samples are saved in cache_y_/u_/v_).
+    // intra-prediction (the top samples are saved in cache_y/u/v).
     // But we need to cast the const away, though.
     WebPMultRows((uint8_t*)io->y, io->y_stride,
                  io->a, io->width, io->mb_w, mb_h, 0);

@@ -482,10 +482,10 @@ void VP8LTransformColor_C(const VP8LMultipliers* WEBP_RESTRICT const m,
     const int8_t red   = U32ToS8(argb >> 16);
     int new_red = red & 0xff;
     int new_blue = argb & 0xff;
-    new_red -= ColorTransformDelta((int8_t)m->green_to_red_, green);
+    new_red -= ColorTransformDelta((int8_t)m->green_to_red, green);
     new_red &= 0xff;
-    new_blue -= ColorTransformDelta((int8_t)m->green_to_blue_, green);
-    new_blue -= ColorTransformDelta((int8_t)m->red_to_blue_, red);
+    new_blue -= ColorTransformDelta((int8_t)m->green_to_blue, green);
+    new_blue -= ColorTransformDelta((int8_t)m->red_to_blue, red);
     new_blue &= 0xff;
     data[i] = (argb & 0xff00ff00u) | (new_red << 16) | (new_blue);
   }
@@ -583,20 +583,6 @@ static uint32_t ExtraCost_C(const uint32_t* population, int length) {
   return cost;
 }
 
-static uint32_t ExtraCostCombined_C(const uint32_t* WEBP_RESTRICT X,
-                                    const uint32_t* WEBP_RESTRICT Y,
-                                    int length) {
-  int i;
-  uint32_t cost = X[4] + Y[4] + X[5] + Y[5];
-  assert(length % 2 == 0);
-  for (i = 2; i < length / 2 - 1; ++i) {
-    const int xy0 = X[2 * i + 2] + Y[2 * i + 2];
-    const int xy1 = X[2 * i + 3] + Y[2 * i + 3];
-    cost += i * (xy0 + xy1);
-  }
-  return cost;
-}
-
 //------------------------------------------------------------------------------
 
 static void AddVector_C(const uint32_t* WEBP_RESTRICT a,
@@ -611,58 +597,6 @@ static void AddVectorEq_C(const uint32_t* WEBP_RESTRICT a,
   int i;
   for (i = 0; i < size; ++i) out[i] += a[i];
 }
-
-#define ADD(X, ARG, LEN) do {                                                  \
-  if (a->is_used_[X]) {                                                        \
-    if (b->is_used_[X]) {                                                      \
-      VP8LAddVector(a->ARG, b->ARG, out->ARG, (LEN));                          \
-    } else {                                                                   \
-      memcpy(&out->ARG[0], &a->ARG[0], (LEN) * sizeof(out->ARG[0]));           \
-    }                                                                          \
-  } else if (b->is_used_[X]) {                                                 \
-    memcpy(&out->ARG[0], &b->ARG[0], (LEN) * sizeof(out->ARG[0]));             \
-  } else {                                                                     \
-    memset(&out->ARG[0], 0, (LEN) * sizeof(out->ARG[0]));                      \
-  }                                                                            \
-} while (0)
-
-#define ADD_EQ(X, ARG, LEN) do {                                               \
-  if (a->is_used_[X]) {                                                        \
-    if (out->is_used_[X]) {                                                    \
-      VP8LAddVectorEq(a->ARG, out->ARG, (LEN));                                \
-    } else {                                                                   \
-      memcpy(&out->ARG[0], &a->ARG[0], (LEN) * sizeof(out->ARG[0]));           \
-    }                                                                          \
-  }                                                                            \
-} while (0)
-
-void VP8LHistogramAdd(const VP8LHistogram* WEBP_RESTRICT const a,
-                      const VP8LHistogram* WEBP_RESTRICT const b,
-                      VP8LHistogram* WEBP_RESTRICT const out) {
-  int i;
-  const int literal_size = VP8LHistogramNumCodes(a->palette_code_bits_);
-  assert(a->palette_code_bits_ == b->palette_code_bits_);
-
-  if (b != out) {
-    ADD(0, literal_, literal_size);
-    ADD(1, red_, NUM_LITERAL_CODES);
-    ADD(2, blue_, NUM_LITERAL_CODES);
-    ADD(3, alpha_, NUM_LITERAL_CODES);
-    ADD(4, distance_, NUM_DISTANCE_CODES);
-    for (i = 0; i < 5; ++i) {
-      out->is_used_[i] = (a->is_used_[i] | b->is_used_[i]);
-    }
-  } else {
-    ADD_EQ(0, literal_, literal_size);
-    ADD_EQ(1, red_, NUM_LITERAL_CODES);
-    ADD_EQ(2, blue_, NUM_LITERAL_CODES);
-    ADD_EQ(3, alpha_, NUM_LITERAL_CODES);
-    ADD_EQ(4, distance_, NUM_DISTANCE_CODES);
-    for (i = 0; i < 5; ++i) out->is_used_[i] |= a->is_used_[i];
-  }
-}
-#undef ADD
-#undef ADD_EQ
 
 //------------------------------------------------------------------------------
 // Image transforms.
@@ -727,7 +661,6 @@ VP8LFastLog2SlowFunc VP8LFastLog2Slow;
 VP8LFastSLog2SlowFunc VP8LFastSLog2Slow;
 
 VP8LCostFunc VP8LExtraCost;
-VP8LCostCombinedFunc VP8LExtraCostCombined;
 VP8LCombinedShannonEntropyFunc VP8LCombinedShannonEntropy;
 VP8LShannonEntropyFunc VP8LShannonEntropy;
 
@@ -770,7 +703,6 @@ WEBP_DSP_INIT_FUNC(VP8LEncDspInit) {
   VP8LFastSLog2Slow = FastSLog2Slow_C;
 
   VP8LExtraCost = ExtraCost_C;
-  VP8LExtraCostCombined = ExtraCostCombined_C;
   VP8LCombinedShannonEntropy = CombinedShannonEntropy_C;
   VP8LShannonEntropy = ShannonEntropy_C;
 
@@ -863,7 +795,6 @@ WEBP_DSP_INIT_FUNC(VP8LEncDspInit) {
   assert(VP8LFastLog2Slow != NULL);
   assert(VP8LFastSLog2Slow != NULL);
   assert(VP8LExtraCost != NULL);
-  assert(VP8LExtraCostCombined != NULL);
   assert(VP8LCombinedShannonEntropy != NULL);
   assert(VP8LShannonEntropy != NULL);
   assert(VP8LGetEntropyUnrefined != NULL);

@@ -14,15 +14,16 @@
 #include "src/dsp/dsp.h"
 
 #if defined(WEBP_USE_SSE2)
+#include <emmintrin.h>
 
 #include <assert.h>
-#include <emmintrin.h>
 #include <string.h>
 
 #include "src/dsp/cpu.h"
 #include "src/dsp/lossless.h"
 #include "src/dsp/lossless_common.h"
 #include "src/utils/utils.h"
+#include "src/webp/format_constants.h"
 #include "src/webp/types.h"
 
 // For sign-extended multiplying constants, pre-shifted by 5:
@@ -57,9 +58,9 @@ static void SubtractGreenFromBlueAndRed_SSE2(uint32_t* argb_data,
 static void TransformColor_SSE2(const VP8LMultipliers* WEBP_RESTRICT const m,
                                 uint32_t* WEBP_RESTRICT argb_data,
                                 int num_pixels) {
-  const __m128i mults_rb = MK_CST_16(CST_5b(m->green_to_red_),
-                                     CST_5b(m->green_to_blue_));
-  const __m128i mults_b2 = MK_CST_16(CST_5b(m->red_to_blue_), 0);
+  const __m128i mults_rb = MK_CST_16(CST_5b(m->green_to_red),
+                                     CST_5b(m->green_to_blue));
+  const __m128i mults_b2 = MK_CST_16(CST_5b(m->red_to_blue), 0);
   const __m128i mask_ag = _mm_set1_epi32((int)0xff00ff00);  // alpha-green masks
   const __m128i mask_rb = _mm_set1_epi32(0x00ff00ff);       // red-blue masks
   int i;

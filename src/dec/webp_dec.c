@@ -11,7 +11,9 @@
 //
 // Author: Skal (pascal.massimino@gmail.com)
 
+#include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "src/dec/common_dec.h"
 #include "src/dec/vp8_dec.h"
@@ -21,6 +23,7 @@
 #include "src/utils/rescaler_utils.h"
 #include "src/utils/utils.h"
 #include "src/webp/decode.h"
+#include "src/webp/format_constants.h"
 #include "src/webp/mux_types.h"  // ALPHA_FLAG
 #include "src/webp/types.h"
 
@@ -477,23 +480,23 @@ WEBP_NODISCARD static VP8StatusCode DecodeInto(const uint8_t* const data,
     if (dec == NULL) {
       return VP8_STATUS_OUT_OF_MEMORY;
     }
-    dec->alpha_data_ = headers.alpha_data;
-    dec->alpha_data_size_ = headers.alpha_data_size;
+    dec->alpha_data = headers.alpha_data;
+    dec->alpha_data_size = headers.alpha_data_size;
 
     // Decode bitstream header, update io->width/io->height.
     if (!VP8GetHeaders(dec, &io)) {
-      status = dec->status_;   // An error occurred. Grab error status.
+      status = dec->status;   // An error occurred. Grab error status.
     } else {
       // Allocate/check output buffers.
       status = WebPAllocateDecBuffer(io.width, io.height, params->options,
                                      params->output);
       if (status == VP8_STATUS_OK) {  // Decode
         // This change must be done before calling VP8Decode()
-        dec->mt_method_ = VP8GetThreadMethod(params->options, &headers,
-                                             io.width, io.height);
+        dec->mt_method = VP8GetThreadMethod(params->options, &headers,
+                                            io.width, io.height);
         VP8InitDithering(params->options, dec);
         if (!VP8Decode(dec, &io)) {
-          status = dec->status_;
+          status = dec->status;
         }
       }
     }
@@ -504,14 +507,14 @@ WEBP_NODISCARD static VP8StatusCode DecodeInto(const uint8_t* const data,
       return VP8_STATUS_OUT_OF_MEMORY;
     }
     if (!VP8LDecodeHeader(dec, &io)) {
-      status = dec->status_;   // An error occurred. Grab error status.
+      status = dec->status;   // An error occurred. Grab error status.
     } else {
       // Allocate/check output buffers.
       status = WebPAllocateDecBuffer(io.width, io.height, params->options,
                                      params->output);
       if (status == VP8_STATUS_OK) {  // Decode
         if (!VP8LDecodeImage(dec)) {
-          status = dec->status_;
+          status = dec->status;
         }
       }
     }
