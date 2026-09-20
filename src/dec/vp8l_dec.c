@@ -328,6 +328,7 @@ static int ReadHuffmanCode(int alphabet_size, VP8LDecoder* const dec,
     const int first_symbol_len_code = VP8LReadBits(br, 1);
     // The first code is either 1 bit or 8 bit code.
     int symbol = VP8LReadBits(br, (first_symbol_len_code == 0) ? 1 : 8);
+    // 'symbol' can exceed 'alphabet_size', but not code_lengths[]'s size.
     code_lengths[symbol] = 1;
     // The second code (if present), is always 8 bits long.
     if (num_symbols == 2) {
@@ -1424,8 +1425,8 @@ static int ExpandColorMap(int num_colors, VP8LTransform* const transform) {
   return 1;
 }
 
-static int ReadTransform(int* const xsize, int const* ysize,
-                         VP8LDecoder* const dec) {
+// Only 'xsize' can be modified (by COLOR_INDEXING_TRANSFORM).
+static int ReadTransform(int* const xsize, int ysize, VP8LDecoder* const dec) {
   int ok = 1;
   VP8LBitReader* const br = &dec->br;
   VP8LTransform* transform = &dec->transforms[dec->next_transform];
@@ -1440,7 +1441,7 @@ static int ReadTransform(int* const xsize, int const* ysize,
 
   transform->type = type;
   transform->xsize = *xsize;
-  transform->ysize = *ysize;
+  transform->ysize = ysize;
   transform->data = NULL;
   ++dec->next_transform;
   assert(dec->next_transform <= NUM_TRANSFORMS);
@@ -1573,7 +1574,7 @@ static int DecodeImageStream(int xsize, int ysize, int is_level0,
   // Read the transforms (may recurse).
   if (is_level0) {
     while (ok && VP8LReadBits(br, 1)) {
-      ok = ReadTransform(&transform_xsize, &transform_ysize, dec);
+      ok = ReadTransform(&transform_xsize, transform_ysize, dec);
     }
   }
 
@@ -1651,7 +1652,7 @@ static int AllocateInternalBuffers32b(VP8LDecoder* const dec, int final_width) {
   const uint64_t num_pixels = (uint64_t)dec->width * dec->height;
   // Scratch buffer corresponding to top-prediction row for transforming the
   // first row in the row-blocks. Not needed for paletted alpha.
-  const uint64_t cache_top_pixels = (uint16_t)final_width;
+  const uint64_t cache_top_pixels = final_width;
   // Scratch buffer for temporary BGRA storage. Not needed for paletted alpha.
   const uint64_t cache_pixels = (uint64_t)final_width * NUM_ARGB_CACHE_ROWS;
   // Scratch buffer to accumulate RGBA values (hence 4*)for YUV conversion.

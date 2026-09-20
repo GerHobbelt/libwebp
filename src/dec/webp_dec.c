@@ -250,6 +250,7 @@ static VP8StatusCode ParseVP8Header(const uint8_t* WEBP_COUNTED_BY(*data_size) *
   assert(data_size != NULL);
   assert(chunk_size != NULL);
   assert(is_lossless != NULL);
+  assert(local_data_size >= TAG_SIZE);  // what the two memcmp() above need
 
   if (*data_size < CHUNK_HEADER_SIZE) {
     return VP8_STATUS_NOT_ENOUGH_DATA;  // Insufficient data.

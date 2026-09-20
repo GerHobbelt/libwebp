@@ -91,7 +91,7 @@ WEBP_NODISCARD static VP8StatusCode ALPHInit(ALPHDecoder* const dec,
   if (!VP8InitIo(io)) {
     return VP8_STATUS_INVALID_PARAM;
   }
-  WebPInitCustomIo(NULL, io);
+  // Don't plug the I/O functions: they expect a WebPDecParams* opaque.
   io->opaque = dec;
   io->width = src_io->width;
   io->height = src_io->height;

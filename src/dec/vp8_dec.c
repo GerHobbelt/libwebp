@@ -147,7 +147,7 @@ int VP8GetInfo(const uint8_t* WEBP_COUNTED_BY(data_size) data, size_t data_size,
       return 0;                         // inconsistent size information.
     }
     if (w == 0 || h == 0) {
-      return 0;  // We don't support both width and height to be zero.
+      return 0;  // We don't support a zero width or height.
     }
 
     if (width) {

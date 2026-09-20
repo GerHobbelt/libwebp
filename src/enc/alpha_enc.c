@@ -356,7 +356,6 @@ static int EncodeAlpha(VP8Encoder* const enc, int quality, int method,
     }
 #if !defined(WEBP_DISABLE_STATS)
     if (pic->stats != NULL) {  // need stats?
-      pic->stats->coded_size += (int)(*output_size);
       enc->sse[3] = sse;
     }
 #endif
