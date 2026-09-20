@@ -69,6 +69,7 @@ static fixed_y_t clip_bit_depth(int y, int bit_depth) {
 //------------------------------------------------------------------------------
 
 static int RGBToGray(int64_t r, int64_t g, int64_t b) {
+  // r/g/b can reach ~71501 (Smpte428's EOTF), not just the usual <= 65536.
   const int64_t luma = 13933 * r + 46871 * g + 4732 * b + kYuvHalf;
   return (int)(luma >> YUV_FIX);
 }
