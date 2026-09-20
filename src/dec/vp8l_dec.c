@@ -403,10 +403,11 @@ static int ReadHuffmanCodes(VP8LDecoder* const dec, int xsize, int ysize,
     // Check the validity of num_htree_groups_max. If it seems too big, use a
     // smaller value for later. This will prevent big memory allocations to end
     // up with a bad bitstream anyway.
-    // The value of 1000 is totally arbitrary. We know that num_htree_groups_max
-    // is smaller than (1 << 16) and should be smaller than the number of pixels
-    // (though the format allows it to be bigger).
-    if (num_htree_groups_max > 1000 || num_htree_groups_max > xsize * ysize) {
+    // The value of 200 is arbitrary but the encoder of the current code usually
+    // does not go above that value. We also know that num_htree_groups_max is
+    // smaller than (1 << 16) and should be smaller than the number of pixels in
+    // the Huffman image (though the format allows it to be bigger).
+    if (num_htree_groups_max > 200 || num_htree_groups_max > huffman_pixs) {
       // Create a mapping from the used indices to the minimal set of used
       // values [0, num_htree_groups)
       mapping = (int*)WebPSafeMalloc(num_htree_groups_max, sizeof(*mapping));
@@ -423,6 +424,12 @@ static int ReadHuffmanCodes(VP8LDecoder* const dec, int xsize, int ysize,
         int* const mapped_group = &mapping[huffman_image[i]];
         if (*mapped_group == -1) *mapped_group = num_htree_groups++;
         huffman_image[i] = *mapped_group;
+      }
+      if (num_htree_groups == num_htree_groups_max) {
+        // No remapping is needed.
+        WebPSafeFree(mapping);
+        mapping = NULL;
+        num_htree_groups = num_htree_groups_max;
       }
     } else {
       num_htree_groups = num_htree_groups_max;
