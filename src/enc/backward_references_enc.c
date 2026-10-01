@@ -13,12 +13,14 @@
 #include "src/enc/backward_references_enc.h"
 
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "src/dsp/cpu.h"
 #include "src/dsp/lossless.h"
 #include "src/dsp/lossless_common.h"
 #include "src/enc/histogram_enc.h"
+#include "src/enc/ll_tune.h"
 #include "src/enc/vp8i_enc.h"
 #include "src/utils/color_cache_utils.h"
 #include "src/utils/utils.h"
@@ -234,11 +236,14 @@ GetPixPairHash64(const uint32_t* const argb) {
 // Returns the maximum number of hash chain lookups to do for a
 // given compression quality. Return value in range [8, 86].
 static int GetMaxItersForQuality(int quality) {
+  if (VP8LGetTune()->iters >= 0) return VP8LGetTune()->iters;
   return 8 + (quality * quality) / 128;
 }
 
 static int GetWindowSizeForHashChain(int quality, int xsize) {
-  const int max_window_size = (quality > 75)   ? LZ77_WINDOW_SIZE
+  const int max_window_size = (VP8LGetTune()->window_rows > 0)
+                                  ? (xsize * VP8LGetTune()->window_rows)
+                              : (quality > 75) ? LZ77_WINDOW_SIZE
                               : (quality > 50) ? (xsize << 8)
                               : (quality > 25) ? (xsize << 6)
                                                : (xsize << 4);
@@ -272,6 +277,12 @@ int VP8LHashChainFill(VP8LHashChain* const p, int quality,
 
   if (size <= 2) {
     p->offset_length[0] = p->offset_length[size - 1] = 0;
+    return 1;
+  }
+
+  // Only RLE and no TraceBackwards requested: nobody reads the hash chain.
+  if (VP8LGetTune()->lz77 > 0 && !(VP8LGetTune()->lz77 & (kLZ77Standard | kLZ77Box)) &&
+      VP8LGetTune()->trace == 0) {
     return 1;
   }
 
@@ -852,9 +863,59 @@ Error:
 }
 
 // Update (in-place) backward references for specified cache_bits.
+// LL_STATS: was a missed literal seen earlier in the image (eviction miss)
+// or never (compulsory miss)? Small open-addressing set of seen values.
+#define LL_SEEN_BITS 22
+static int SeenBefore(uint32_t* const seen, uint32_t v) {
+  uint32_t h = (v * 0x9E3779B1u) >> (32 - LL_SEEN_BITS);
+  const uint32_t key = v + 1;  // 0 marks an empty slot (v = 0xffffffff aliases, fine for stats)
+  while (seen[h] != 0) {
+    if (seen[h] == key) return 1;
+    h = (h + 1) & ((1u << LL_SEEN_BITS) - 1);
+  }
+  seen[h] = key;
+  return 0;
+}
+
+// Plane codes in decoder order (same table as src/dec/vp8l_dec.c).
+static const uint8_t kLLCodeToPlane[120] = {
+  0x18, 0x07, 0x17, 0x19, 0x28, 0x06, 0x27, 0x29, 0x16, 0x1a,
+  0x26, 0x2a, 0x38, 0x05, 0x37, 0x39, 0x15, 0x1b, 0x36, 0x3a,
+  0x25, 0x2b, 0x48, 0x04, 0x47, 0x49, 0x14, 0x1c, 0x35, 0x3b,
+  0x46, 0x4a, 0x24, 0x2c, 0x58, 0x45, 0x4b, 0x34, 0x3c, 0x03,
+  0x57, 0x59, 0x13, 0x1d, 0x56, 0x5a, 0x23, 0x2d, 0x44, 0x4c,
+  0x55, 0x5b, 0x33, 0x3d, 0x68, 0x02, 0x67, 0x69, 0x12, 0x1e,
+  0x66, 0x6a, 0x22, 0x2e, 0x54, 0x5c, 0x43, 0x4d, 0x65, 0x6b,
+  0x32, 0x3e, 0x78, 0x01, 0x77, 0x79, 0x53, 0x5d, 0x11, 0x1f,
+  0x64, 0x6c, 0x42, 0x4e, 0x76, 0x7a, 0x21, 0x2f, 0x75, 0x7b,
+  0x31, 0x3f, 0x63, 0x6d, 0x52, 0x5e, 0x00, 0x74, 0x7c, 0x41,
+  0x4f, 0x10, 0x20, 0x62, 0x6e, 0x30, 0x73, 0x7d, 0x51, 0x5f,
+  0x40, 0x72, 0x7e, 0x61, 0x6f, 0x50, 0x71, 0x7f, 0x60, 0x70
+};
+
+// LL_NEAR_COPY: on a cache miss, look for the same value among the first N
+// 2D-neighbour plane codes and emit a length-1 copy instead of a literal.
+// Returns the copy distance, or 0 if none was found.
+static uint32_t FindNearCopy(const uint32_t* const argb, int xsize, int pos,
+                             int num_codes) {
+  int c;
+  for (c = 0; c < num_codes; ++c) {
+    const int code = kLLCodeToPlane[c];
+    const int dist = (code >> 4) * xsize + 8 - (code & 0xf);
+    if (dist >= 1 && dist <= pos && argb[pos - dist] == argb[pos]) {
+      return (uint32_t)dist;
+    }
+  }
+  return 0;
+}
+
 WEBP_NODISCARD static int BackwardRefsWithLocalCache(
-    const uint32_t* const argb, int cache_bits, VP8LBackwardRefs* const refs) {
+    const uint32_t* const argb, int xsize, int cache_bits,
+    VP8LBackwardRefs* const refs) {
+  const int near_copy = VP8LGetTune()->near_copy;
   int pixel_index = 0;
+  uint32_t* const seen = (VP8LTuneMainImage && getenv("LL_STATS"))
+      ? (uint32_t*)calloc(1u << LL_SEEN_BITS, sizeof(uint32_t)) : NULL;
   VP8LColorCache hashers;
   VP8LRefsCursor c = VP8LRefsCursorInit(refs);
   if (!VP8LColorCacheInit(&hashers, cache_bits)) return 0;
@@ -867,14 +928,24 @@ WEBP_NODISCARD static int BackwardRefsWithLocalCache(
       if (ix >= 0) {
         // hashers contains argb_literal
         *v = PixOrCopyCreateCacheIdx(ix);
+        if (VP8LTuneMainImage) ++VP8LTuneRefStats[1];
+        if (seen != NULL) SeenBefore(seen, argb_literal);
       } else {
+        const uint32_t dist = (near_copy > 0)
+            ? FindNearCopy(argb, xsize, pixel_index, near_copy) : 0;
         VP8LColorCacheInsert(&hashers, argb_literal);
+        if (dist > 0) *v = PixOrCopyCreateCopy(dist, 1);
+        if (VP8LTuneMainImage) ++VP8LTuneRefStats[dist > 0 ? 2 : 0];
+        if (seen != NULL && SeenBefore(seen, argb_literal) && dist == 0) {
+          ++VP8LTuneRefStats[3];
+        }
       }
       ++pixel_index;
     } else {
       // refs was created without local cache, so it can not have cache indexes.
       int k;
       assert(PixOrCopyIsCopy(v));
+      if (VP8LTuneMainImage) VP8LTuneRefStats[2] += v->len;
       for (k = 0; k < v->len; ++k) {
         VP8LColorCacheInsert(&hashers, argb[pixel_index++]);
       }
@@ -882,6 +953,7 @@ WEBP_NODISCARD static int BackwardRefsWithLocalCache(
     VP8LRefsCursorNext(&c);
   }
   VP8LColorCacheClear(&hashers);
+  free(seen);
   return 1;
 }
 
@@ -917,12 +989,15 @@ WEBP_NODISCARD static int GetBackwardReferences(
 
   histo = VP8LAllocateHistogram(MAX_COLOR_CACHE_BITS);
   if (histo == NULL) goto Error;
+  if (VP8LGetTune()->lz77 > 0) lz77_types_to_try = VP8LGetTune()->lz77;
 
   for (lz77_type = 1; lz77_types_to_try;
        lz77_types_to_try &= ~lz77_type, lz77_type <<= 1) {
     int res = 0;
     uint64_t bit_cost = 0u;
+    double t0;
     if ((lz77_types_to_try & lz77_type) == 0) continue;
+    t0 = VP8LTuneNow();
     switch (lz77_type) {
       case kLZ77RLE:
         res = BackwardReferencesRle(width, height, argb, 0, refs_tmp);
@@ -942,6 +1017,7 @@ WEBP_NODISCARD static int GetBackwardReferences(
         assert(0);
     }
     if (!res) goto Error;
+    if (VP8LTuneMainImage) VP8LTuneTimers()[kLLLz77] += VP8LTuneNow() - t0;
 
     // Start with the no color cache case.
     for (i = 1; i >= 0; --i) {
@@ -951,14 +1027,19 @@ WEBP_NODISCARD static int GetBackwardReferences(
 
       if (i == 0) {
         // Try with a color cache.
-        if (!CalculateBestCacheSize(argb, quality, refs_tmp, &cache_bits)) {
+        t0 = VP8LTuneNow();
+        if (VP8LGetTune()->cache_bits >= 0) {
+          if (cache_bits > 0) cache_bits = VP8LGetTune()->cache_bits;
+        } else if (!CalculateBestCacheSize(argb, quality, refs_tmp,
+                                           &cache_bits)) {
           goto Error;
         }
         if (cache_bits > 0) {
-          if (!BackwardRefsWithLocalCache(argb, cache_bits, refs_tmp)) {
+          if (!BackwardRefsWithLocalCache(argb, width, cache_bits, refs_tmp)) {
             goto Error;
           }
         }
+        if (VP8LTuneMainImage) VP8LTuneTimers()[kLLCache] += VP8LTuneNow() - t0;
       }
 
       if (i == 0 && do_no_cache && cache_bits == 0) {
@@ -991,7 +1072,8 @@ WEBP_NODISCARD static int GetBackwardReferences(
     if (i == 1 && !do_no_cache) continue;
     if ((lz77_types_best[i] == kLZ77Standard ||
          lz77_types_best[i] == kLZ77Box) &&
-        quality >= 25) {
+        (VP8LGetTune()->trace >= 0 ? VP8LGetTune()->trace : quality >= 25)) {
+      const double t0 = VP8LTuneNow();
       const VP8LHashChain* const hash_chain_tmp =
           (lz77_types_best[i] == kLZ77Standard) ? hash_chain : &hash_chain_box;
       const int cache_bits = (i == 1) ? 0 : *cache_bits_best;
@@ -1006,6 +1088,7 @@ WEBP_NODISCARD static int GetBackwardReferences(
       if (bit_cost_trace < bit_costs_best[i]) {
         BackwardRefsSwap(refs_tmp, &refs[i]);
       }
+      if (VP8LTuneMainImage) VP8LTuneTimers()[kLLTrace] += VP8LTuneNow() - t0;
     }
 
     BackwardReferences2DLocality(width, &refs[i]);

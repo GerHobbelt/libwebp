@@ -20,6 +20,7 @@
 
 #include "src/dsp/lossless.h"
 #include "src/dsp/lossless_common.h"
+#include "src/enc/ll_tune.h"
 #include "src/enc/vp8i_enc.h"
 #include "src/enc/vp8li_enc.h"
 #include "src/utils/utils.h"
@@ -32,6 +33,12 @@ static const int64_t kSpatialPredictorBias = 15ll << LOG_2_PRECISION_BITS;
 static const int kPredLowEffort = 11;
 static const uint32_t kMaskAlpha = 0xff000000;
 static const int kNumPredModes = 14;
+
+// Predictor modes to evaluate (LL_PRED_MODES bitmask, default all).
+static int PredModeEnabled(int mode) {
+  const int mask = VP8LGetTune()->pred_modes;
+  return (mask <= 0) || ((mask >> mode) & 1);
+}
 
 // Mostly used to reduce code size + readability
 static WEBP_INLINE int GetMin(int a, int b) { return (a > b) ? b : a; }
@@ -387,6 +394,7 @@ static void GetBestPredictorForTile(const uint32_t* const all_argb,
   for (mode = 0; mode < kNumPredModes; ++mode) {
     const uint32_t* const histo_argb =
         GetHistoArgbConst(all_argb, subsampling_index, mode);
+    if (!PredModeEnabled(mode)) continue;
     const int64_t cur_diff = PredictionCostSpatialHistogram(
         accumulated_argb, histo_argb, mode, left_mode, above_mode);
 
@@ -400,6 +408,7 @@ static void GetBestPredictorForTile(const uint32_t* const all_argb,
   VP8LAddVectorEq(best_histo, accumulated_argb, HISTO_SIZE);
   modes[tile_y * tiles_per_row + tile_x] = ARGB_BLACK | (best_mode << 8);
   ++pred_histos[best_mode];
+  ++VP8LTunePredCounts[subsampling_index][best_mode];
 }
 
 // Computes the residuals for the different predictors.
@@ -450,6 +459,7 @@ static void ComputeResidualsForTile(
     int relative_y;
     uint32_t* const histo_argb =
         GetHistoArgb(all_argb, /*subsampling_index=*/0, mode);
+    if (!PredModeEnabled(mode)) continue;
     if (start_y > 0) {
       // Read the row above the tile which will become the first upper_row.
       // Include a pixel to the left if it exists; include a pixel to the right
@@ -978,7 +988,9 @@ static void GetBestGreenToRed(const uint32_t* argb, int stride, int tile_width,
                               VP8LMultipliers prev_y, int quality,
                               const uint32_t accumulated_red_histo[256],
                               VP8LMultipliers* const best_tx) {
-  const int kMaxIters = 4 + ((7 * quality) >> 8);  // in range [4..6]
+  const int kMaxIters = (VP8LGetTune()->cross_red_iters >= 0)
+                            ? VP8LGetTune()->cross_red_iters
+                            : 4 + ((7 * quality) >> 8);  // in range [4..6]
   int green_to_red_best = 0;
   int iter, offset;
   int64_t best_diff = GetPredictionCostCrossColorRed(
@@ -1054,7 +1066,9 @@ static void GetBestGreenRedToBlue(const uint32_t* argb, int stride,
   // never recurs once a smaller one has been tried, and uses -1 as "none".
   const int8_t delta_lut[kGreenRedToBlueMaxIters] = {16, 16, 8, 4, 2, 2, 2};
   // Only axis aligned diffs for lower quality.
-  const int iters = (quality < 25)   ? 1
+  const int iters = (VP8LGetTune()->cross_blue_iters >= 0)
+                        ? VP8LGetTune()->cross_blue_iters
+                    : (quality < 25) ? 1
                     : (quality > 50) ? kGreenRedToBlueMaxIters
                                      : 4;
   int green_to_blue_best = 0;
@@ -1112,11 +1126,14 @@ static VP8LMultipliers GetBestColorTransformForTile(
   const uint32_t* const tile_argb =
       argb + tile_y_offset * xsize + tile_x_offset;
   VP8LMultipliers best_tx;
+  // Only look at every step-th row of the tile when estimating costs.
+  const int step = (VP8LGetTune()->cross_step > 1) ? VP8LGetTune()->cross_step : 1;
+  const int sub_height = (tile_height + step - 1) / step;
   MultipliersClear(&best_tx);
 
-  GetBestGreenToRed(tile_argb, xsize, tile_width, tile_height, prev_x, prev_y,
-                    quality, accumulated_red_histo, &best_tx);
-  GetBestGreenRedToBlue(tile_argb, xsize, tile_width, tile_height, prev_x,
+  GetBestGreenToRed(tile_argb, xsize * step, tile_width, sub_height, prev_x,
+                    prev_y, quality, accumulated_red_histo, &best_tx);
+  GetBestGreenRedToBlue(tile_argb, xsize * step, tile_width, sub_height, prev_x,
                         prev_y, quality, accumulated_blue_histo, &best_tx);
   return best_tx;
 }

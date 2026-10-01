@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 // The maximum allowed limit is 11.
-#define MAX_COLOR_CACHE_BITS 10
+#define MAX_COLOR_CACHE_BITS 11  // webpll: format allows 11 (stock libwebp: 10)
 
 // -----------------------------------------------------------------------------
 // PixOrCopy

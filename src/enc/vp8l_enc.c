@@ -21,6 +21,7 @@
 #include "src/dsp/lossless_common.h"
 #include "src/enc/backward_references_enc.h"
 #include "src/enc/histogram_enc.h"
+#include "src/enc/ll_tune.h"
 #include "src/enc/vp8i_enc.h"
 #include "src/enc/vp8li_enc.h"
 #include "src/utils/bit_writer_utils.h"
@@ -32,6 +33,49 @@
 #include "src/webp/format_constants.h"
 #include "src/webp/types.h"
 
+// -----------------------------------------------------------------------------
+// webpll tuning knobs and stage timers (see ll_tune.h)
+
+static int TuneEnv(const char* name) {
+  const char* const v = getenv(name);
+  return (v != NULL && *v != '\0') ? atoi(v) : -1;
+}
+
+const VP8LTune* VP8LGetTune(void) {
+  static VP8LTune tune;
+  static int init = 0;
+  if (!init) {
+    tune.iters = TuneEnv("LL_ITERS");
+    tune.window_rows = TuneEnv("LL_WINDOW_ROWS");
+    tune.trace = TuneEnv("LL_TRACE");
+    tune.lz77 = TuneEnv("LL_LZ77");
+    tune.cache_bits = TuneEnv("LL_CACHE_BITS");
+    tune.pred_modes = TuneEnv("LL_PRED_MODES");
+    tune.cross_color = TuneEnv("LL_CROSS");
+    tune.histo_bits = TuneEnv("LL_HISTO_BITS");
+    tune.transform_bits = TuneEnv("LL_TRANSFORM_BITS");
+    tune.pred_max_bits = TuneEnv("LL_PRED_MAX_BITS");
+    tune.cross_step = TuneEnv("LL_CROSS_STEP");
+    tune.cross_red_iters = TuneEnv("LL_CROSS_RED_ITERS");
+    tune.cross_blue_iters = TuneEnv("LL_CROSS_BLUE_ITERS");
+    tune.cross_bits = TuneEnv("LL_CROSS_BITS");
+    tune.entropy_idx = TuneEnv("LL_ENTROPY_IDX");
+    tune.near_copy = TuneEnv("LL_NEAR_COPY");
+    init = 1;
+  }
+  return &tune;
+}
+
+double* VP8LTuneTimers(void) {
+  static double timers[kLLNumTimers];
+  return timers;
+}
+
+// Set while the main (transformed) image is encoded, so that sub-image encodes
+// inside the transforms are not counted in the LZ77/histogram timers.
+int VP8LTuneMainImage = 0;
+unsigned VP8LTunePredCounts[8][14];
+unsigned long long VP8LTuneRefStats[4];
 #define MAX_HUFFMAN_BITS (MIN_HUFFMAN_BITS + (1 << NUM_HUFFMAN_BITS) - 1)
 // Empirical value for which it becomes too computationally expensive to
 // compute the best predictor image.
@@ -354,8 +398,15 @@ WEBP_NODISCARD static int EncoderAnalyze(
   // Empirical bit sizes.
   enc->histo_bits = GetHistoBits(method, use_palette, pic->width, pic->height);
   transform_bits = GetTransformBits(method, enc->histo_bits);
+  if (VP8LGetTune()->histo_bits >= 0) enc->histo_bits = VP8LGetTune()->histo_bits;
+  if (VP8LGetTune()->transform_bits >= 0) {
+    transform_bits = VP8LGetTune()->transform_bits;
+  }
   enc->predictor_transform_bits = transform_bits;
   enc->cross_color_transform_bits = transform_bits;
+  if (VP8LGetTune()->cross_bits >= 0) {
+    enc->cross_color_transform_bits = VP8LGetTune()->cross_bits;
+  }
 
   if (low_effort) {
     // AnalyzeEntropy is somewhat slow.
@@ -397,6 +448,9 @@ WEBP_NODISCARD static int EncoderAnalyze(
       // Only choose the guessed best transform.
       *crunch_configs_size = 1;
       crunch_configs[0].entropy_idx = min_entropy_ix;
+      if (VP8LGetTune()->entropy_idx >= 0 && !use_palette) {
+        crunch_configs[0].entropy_idx = (EntropyIx)VP8LGetTune()->entropy_idx;
+      }
       crunch_configs[0].palette_sorting_type =
           use_palette ? kMinimizeDelta : kUnusedPalette;
       if (method >= 4 && config->quality >= 50) {
@@ -908,9 +962,13 @@ WEBP_NODISCARD static int EncodeImageInternal(
   }
 
   percent_range = remaining_percent / 5;
-  if (!VP8LHashChainFill(hash_chain, quality, argb, width, height, low_effort,
-                         pic, percent_range, percent)) {
-    goto Error;
+  {
+    const double t0 = VP8LTuneNow();
+    if (!VP8LHashChainFill(hash_chain, quality, argb, width, height,
+                           low_effort, pic, percent_range, percent)) {
+      goto Error;
+    }
+    if (VP8LTuneMainImage) VP8LTuneTimers()[kLLHashChain] += VP8LTuneNow() - t0;
   }
   percent_start += percent_range;
   remaining_percent -= percent_range;
@@ -962,11 +1020,15 @@ WEBP_NODISCARD static int EncodeImageInternal(
 
       i_percent_range = i_remaining_percent / 3;
       i_remaining_percent -= i_percent_range;
-      if (!VP8LGetHistoImageSymbols(
-              width, height, &refs_array[i_cache], quality, low_effort,
-              histogram_bits, cache_bits_tmp, histogram_image, tmp_histo,
-              histogram_argb, pic, i_percent_range, percent)) {
-        goto Error;
+      {
+        const double t0 = VP8LTuneNow();
+        if (!VP8LGetHistoImageSymbols(
+                width, height, &refs_array[i_cache], quality, low_effort,
+                histogram_bits, cache_bits_tmp, histogram_image, tmp_histo,
+                histogram_argb, pic, i_percent_range, percent)) {
+          goto Error;
+        }
+        if (VP8LTuneMainImage) VP8LTuneTimers()[kLLHisto] += VP8LTuneNow() - t0;
       }
       // Create Huffman bit lengths and codes for each histogram image.
       histogram_image_size = histogram_image->size;
@@ -1554,6 +1616,7 @@ WEBP_NODISCARD static int EncodeStreamHook(void* input, void* data2) {
     const int entropy_idx = crunch_configs[idx].entropy_idx;
     int remaining_percent = 97 / num_crunch_configs, percent_range;
     int predictor_transform_bits = 0, cross_color_transform_bits = 0;
+    double t_main;
     enc->use_palette =
         (entropy_idx == kPalette) || (entropy_idx == kPaletteAndSpatial);
     enc->use_subtract_green =
@@ -1567,6 +1630,7 @@ WEBP_NODISCARD static int EncodeStreamHook(void* input, void* data2) {
     } else {
       enc->use_cross_color = red_and_blue_always_zero ? 0 : enc->use_predict;
     }
+    if (VP8LGetTune()->cross_color == 0) enc->use_cross_color = 0;
     // Reset any parameter in the encoder that is set in the previous iteration.
     enc->cache_bits = 0;
     VP8LBackwardRefsClear(&enc->refs[0]);
@@ -1624,6 +1688,7 @@ WEBP_NODISCARD static int EncodeStreamHook(void* input, void* data2) {
     }
 
     if (enc->use_predict) {
+      const double t0 = VP8LTuneNow();
       percent_range = remaining_percent / 3;
       if (!ApplyPredictFilter(enc, enc->current_width, height, quality,
                               low_effort, enc->use_subtract_green, bw,
@@ -1631,16 +1696,19 @@ WEBP_NODISCARD static int EncodeStreamHook(void* input, void* data2) {
                               &predictor_transform_bits)) {
         goto Error;
       }
+      VP8LTuneTimers()[kLLPredict] += VP8LTuneNow() - t0;
       remaining_percent -= percent_range;
     }
 
     if (enc->use_cross_color) {
+      const double t0 = VP8LTuneNow();
       percent_range = remaining_percent / 2;
       if (!ApplyCrossColorFilter(enc, enc->current_width, height, quality,
                                  low_effort, bw, percent_range, &percent,
                                  &cross_color_transform_bits)) {
         goto Error;
       }
+      VP8LTuneTimers()[kLLCross] += VP8LTuneNow() - t0;
       remaining_percent -= percent_range;
     }
 
@@ -1648,13 +1716,18 @@ WEBP_NODISCARD static int EncodeStreamHook(void* input, void* data2) {
 
     // -------------------------------------------------------------------------
     // Encode and write the transformed image.
+    VP8LTuneMainImage = 1;
+    t_main = VP8LTuneNow();
     if (!EncodeImageInternal(
             bw, enc->argb, &enc->hash_chain, enc->refs, enc->current_width,
             height, quality, low_effort, &crunch_configs[idx], &enc->cache_bits,
             enc->histo_bits, byte_position, &hdr_size, &data_size, picture,
             remaining_percent, &percent)) {
+      VP8LTuneMainImage = 0;
       goto Error;
     }
+    VP8LTuneMainImage = 0;
+    VP8LTuneTimers()[kLLMainImage] += VP8LTuneNow() - t_main;
 
     // If we are better than what we already have.
     if (VP8LBitWriterNumBytes(bw) < best_size) {
@@ -1720,11 +1793,15 @@ int VP8LEncodeStream(const WebPConfig* const config,
   }
 
   // Analyze image (entropy, num_palettes etc)
-  if (!EncoderAnalyze(enc_main, crunch_configs, &num_crunch_configs_main,
-                      &red_and_blue_always_zero) ||
-      !EncoderInit(enc_main)) {
-    WebPEncodingSetError(picture, VP8_ENC_ERROR_OUT_OF_MEMORY);
-    goto Error;
+  {
+    const double t0 = VP8LTuneNow();
+    if (!EncoderAnalyze(enc_main, crunch_configs, &num_crunch_configs_main,
+                        &red_and_blue_always_zero) ||
+        !EncoderInit(enc_main)) {
+      WebPEncodingSetError(picture, VP8_ENC_ERROR_OUT_OF_MEMORY);
+      goto Error;
+    }
+    VP8LTuneTimers()[kLLAnalyze] += VP8LTuneNow() - t0;
   }
 
   // Split the configs between the main and side threads (if any).
