@@ -38,6 +38,7 @@ on:
   push:
     branches: ['compiler-bench']
     tags: ['natives-*']
+    paths-ignore: ['**.md']   # (not applied to tag pushes)
 
 permissions:
   contents: read
@@ -167,6 +168,7 @@ jobs:
   build:
     name: build ${{ matrix.compiler }}-${{ matrix.variant }}
     needs: [resolve, gcc-toolchain]
+    if: ${{ !cancelled() && needs.resolve.result == 'success' }}   # a failed toolchain fails only its builds
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
