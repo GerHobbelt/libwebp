@@ -9,6 +9,9 @@ webp_bench is single-threaded and pinned to one core (not core 0) at high priori
   3. correctness pass: every build runs every test once; decoder and rescaler output must be identical
      to the baseline (integer code paths), lossless round trips are verified inside webp_bench
   4. timed rounds; summary.md (also appended to the job summary), results.json, ranking.json
+
+--train EXE: PGO training only - run an instrumented webp_bench over the images (every encode test, then
+every decode test on its own output) and exit; the profile is written by the instrumented runtime.
 """
 import argparse
 import glob
@@ -100,7 +103,8 @@ def geomean(xs):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--builds-dir", required=True)
+    ap.add_argument("--builds-dir")
+    ap.add_argument("--train", help="instrumented webp_bench.exe: run the PGO training workload and exit")
     ap.add_argument("--images", nargs="+", required=True)
     ap.add_argument("--rounds", type=int, default=5)
     ap.add_argument("--min-time", type=float, default=0.5, help="seconds per test per run")
@@ -109,6 +113,19 @@ def main():
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
+
+    if a.train:
+        corpus_dir = os.path.join(a.out, "corpus")
+        raws = make_corpus(a.images, corpus_dir, a.max_mpix)
+        for step in ("encode", "decode"):  # the decode inputs are written by the encode step
+            args = ["-o", corpus_dir] + raws if step == "encode" else                 sorted(glob.glob(os.path.join(corpus_dir, "*.webp")))
+            rc, out, err = run([os.path.abspath(a.train), "-t", "0"] + args)
+            print(out + err, flush=True)
+            if rc != 0 or len(out.splitlines()) < 2:
+                sys.exit(f"training {step} run failed ({rc})")
+        return
+    if not a.builds_dir:
+        sys.exit("--builds-dir is required")
 
     builds = sorted(d for d in os.listdir(a.builds_dir)
                     if os.path.isfile(os.path.join(a.builds_dir, d, "webp_bench.exe")))

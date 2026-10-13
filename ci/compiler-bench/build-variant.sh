@@ -1,39 +1,55 @@
 #!/usr/bin/env bash
 # Cross-build (Linux host -> Windows x64) the webp4j JNI library webp4j-windows-x64.dll (drop-in for
 # dev.matrixlab.webp4j:webp4j-core) and webp_bench.exe from this libwebp checkout, with one compiler and
-# one optimization variant. Used by .github/workflows/windows-x64-compilers.yml.
+# one optimization variant. Used by .github/workflows/natives-windows-x64.yml.
 #
-# Usage: build-variant.sh <gcc|clang> <base|avx2|avx2-lto> <out-dir>
+# Usage: build-variant.sh <gcc|clang> <base|avx2|avx2-lto|avx2-lto-pgogen|avx2-lto-pgo> <out-dir>
 #   x86_64-w64-mingw32-{gcc,g++|clang,clang++} must be on PATH. Environment:
 #     WEBP4J_SRC  webp4j source tree whose libwebp/ points to this repository
 #     GIFLIB_SRC  giflib 5.2.2 source tree (webp4j's FetchContent dependency)
 #     JAVA_HOME   any JDK (only the platform-independent jni.h is used)
+#     PGO_DIR     profile directory of the pgo variants (default /tmp/pgo; same path for gen and use):
+#                 GCC writes/reads <PGO_DIR>/<mangled object path>.gcda, Clang reads <PGO_DIR>/webp.profdata
 # Variants:
 #   base      webp4j's release defaults: -O3, LTO for the JNI glue only, generic x86-64 (libwebp still
 #             picks its SSE2/SSE4.1/AVX2 code at run time)
 #   avx2      -O3 -march=x86-64-v3 (AVX2/FMA/BMI2: Intel Haswell+, AMD Zen+) -ffast-math (implies
 #             -funsafe-math-optimizations -ffinite-math-only -fno-math-errno -fno-trapping-math ...)
 #   avx2-lto  avx2 + whole-program LTO (libwebp + giflib + JNI glue)
+#   avx2-lto-pgogen  avx2-lto, instrumented for profile-guided optimization (training build, not shipped)
+#   avx2-lto-pgo     avx2-lto + profile-guided optimization with the profile of a pgogen training run
 set -euo pipefail
 
 CC_KIND=$1
 VARIANT=$2
-OUT=$(mkdir -p "$3" && cd "$3" && pwd)
+OUT=$(mkdir -p "$3" && cd "$3" && pwd -P)
 HERE=$(cd "$(dirname "$0")" && pwd)
 WORK=$(dirname "$OUT")/work-$(basename "$OUT")   # build trees stay out of the uploaded OUT dir
+B=$WORK/build
 T=x86_64-w64-mingw32
+PGO_DIR=${PGO_DIR:-/tmp/pgo}
 : "${WEBP4J_SRC:?}" "${GIFLIB_SRC:?}" "${JAVA_HOME:?}"
 
 case $CC_KIND in
-    # GCC LTO objects need the plugin-aware gcc-ar; llvm-mingw's ar is llvm-ar
-    gcc)   CC=$T-gcc;   CXX=$T-g++;     AR=$T-gcc-ar; RANLIB=$T-gcc-ranlib; LTO=-flto=auto ;;
-    clang) CC=$T-clang; CXX=$T-clang++; AR=$T-ar;     RANLIB=$T-ranlib;     LTO=-flto ;;
+    # GCC LTO objects need the plugin-aware gcc-ar; llvm-mingw's ar is llvm-ar.
+    # GCC PGO: -fprofile-prefix-path makes the .gcda names relative to the build dir, so the training
+    # build and the profile-use build (different dirs) share them; partial training keeps the code that
+    # webp_bench does not exercise (animation, GIF, JNI glue) optimized normally instead of for size.
+    gcc)   CC=$T-gcc;   CXX=$T-g++;     AR=$T-gcc-ar; RANLIB=$T-gcc-ranlib; LTO=-flto=auto
+           PGEN="-fprofile-generate=$PGO_DIR -fprofile-prefix-path=$B"
+           PUSE="-fprofile-use=$PGO_DIR -fprofile-prefix-path=$B -fprofile-partial-training -Wno-missing-profile" ;;
+    clang) CC=$T-clang; CXX=$T-clang++; AR=$T-ar;     RANLIB=$T-ranlib;     LTO=-flto
+           PGEN="-fprofile-generate"   # the training run sets LLVM_PROFILE_FILE
+           PUSE="-fprofile-use=$PGO_DIR/webp.profdata -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date" ;;
     *) echo "unknown compiler kind: $CC_KIND" >&2; exit 2 ;;
 esac
+AVX2="-O3 -march=x86-64-v3 -ffast-math"
 case $VARIANT in
-    base)     PERF="" ;;
-    avx2)     PERF="-O3 -march=x86-64-v3 -ffast-math" ;;
-    avx2-lto) PERF="-O3 -march=x86-64-v3 -ffast-math $LTO" ;;
+    base)            PERF="" ;;
+    avx2)            PERF="$AVX2" ;;
+    avx2-lto)        PERF="$AVX2 $LTO" ;;
+    avx2-lto-pgogen) PERF="$AVX2 $LTO $PGEN" ;;
+    avx2-lto-pgo)    PERF="$AVX2 $LTO $PUSE" ;;
     *) echo "unknown variant: $VARIANT" >&2; exit 2 ;;
 esac
 
@@ -65,7 +81,6 @@ KERNEL32=$($CC -print-file-name=libkernel32.a)   # the target's own (llvm-mingw 
 [ -f "$KERNEL32" ] || { echo "libkernel32.a not found" >&2; exit 1; }
 
 echo "::group::configure + build ($CC_KIND $VARIANT)"
-B=$WORK/build
 cmake -S "$WORK/superbuild" -B "$B" -G Ninja \
     -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 \
     -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX -DCMAKE_RC_COMPILER=$T-windres \

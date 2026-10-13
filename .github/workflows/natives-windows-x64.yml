@@ -11,6 +11,8 @@ name: Windows x64 natives (GCC snapshot vs Clang nightly) - build, test, benchma
 #   base      webp4j's release defaults (-O3, generic x86-64, libwebp's run-time SSE2/SSE4.1/AVX2 dispatch)
 #   avx2      -O3 -march=x86-64-v3 -ffast-math         (needs an AVX2/FMA/BMI2 CPU: Haswell / Zen 1+)
 #   avx2-lto  avx2 + whole-program LTO
+#   avx2-lto-pgo  avx2-lto + profile-guided optimization: an instrumented build (avx2-lto-pgogen) is
+#             trained on Windows with images disjoint from the benchmark corpus (ci/compiler-bench/corpus.sh)
 # Builds are cross-compiled on Linux; every DLL then runs webp4j's JUnit suite on a native Windows x64
 # JVM, and all builds are benchmarked on ONE Windows runner in interleaved rounds
 # (ci/compiler-bench/bench.py; results in the job summary + artifact).
@@ -59,6 +61,8 @@ jobs:
     outputs:
       gcc_toolchains: ${{ steps.r.outputs.gcc_toolchains }}
       builds: ${{ steps.r.outputs.builds }}
+      tested: ${{ steps.r.outputs.tested }}
+      pgo: ${{ steps.r.outputs.pgo }}
     steps:
       - uses: actions/checkout@v4
 
@@ -83,12 +87,16 @@ jobs:
             tcs="$tcs,$(tc gcc16 "$GCC_STABLE" "https://gcc.gnu.org/pub/gcc/releases/$GCC_STABLE/$GCC_STABLE.tar.xz")"
             comps="$comps gcc16 clang23"
           fi
-          builds=""
-          for c in $comps; do for v in base avx2 avx2-lto; do
-            builds="$builds{\"compiler\":\"$c\",\"variant\":\"$v\"},"
-          done; done
+          builds=""; tested=""; pgo=""   # build job / test + bench / PGO training + profile-use jobs
+          for c in $comps; do
+            for v in base avx2 avx2-lto avx2-lto-pgogen; do builds="$builds{\"compiler\":\"$c\",\"variant\":\"$v\"},"; done
+            for v in base avx2 avx2-lto avx2-lto-pgo; do tested="$tested{\"compiler\":\"$c\",\"variant\":\"$v\"},"; done
+            pgo="$pgo\"$c\","
+          done
           echo "gcc_toolchains=[$tcs]" >> "$GITHUB_OUTPUT"
           echo "builds=[${builds%,}]" >> "$GITHUB_OUTPUT"
+          echo "tested=[${tested%,}]" >> "$GITHUB_OUTPUT"
+          echo "pgo=[${pgo%,}]" >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
       - name: Download llvm-mingw and giflib once (the nightly asset is replaced daily)
@@ -178,51 +186,10 @@ jobs:
           persist-credentials: false   # no post-job submodule cleanup (libwebp/ becomes a symlink)
           path: webp4j
 
-      - uses: actions/download-artifact@v4
+      - uses: ./libwebp/.github/actions/cross-toolchain
         with:
-          name: deps
-          path: deps
-
-      - name: Set up JDK (jni.h)
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Set up Ninja
-        uses: seanmiddleditch/gha-setup-ninja@v6
-
-      - name: GCC toolchain cache key
-        id: key
-        if: startsWith(matrix.compiler, 'gcc')
-        env:
-          TOOLCHAINS: ${{ needs.resolve.outputs.gcc_toolchains }}
-        run: echo "key=$(echo "$TOOLCHAINS" | jq -r '.[] | select(.name == "${{ matrix.compiler }}") | .key')" >> "$GITHUB_OUTPUT"
-
-      - name: Restore the GCC cross toolchain
-        if: startsWith(matrix.compiler, 'gcc')
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/tc/mingw-${{ matrix.compiler }}
-          key: ${{ steps.key.outputs.key }}
-          fail-on-cache-miss: true
-
-      - name: Get llvm-mingw
-        if: startsWith(matrix.compiler, 'clang')
-        uses: actions/download-artifact@v4
-        with:
-          name: tc-llvm-mingw
-          path: ${{ runner.temp }}/tc-dl
-
-      - name: Put the toolchain on PATH
-        run: |
-          set -euo pipefail
-          case "${{ matrix.compiler }}" in
-            gcc*)   echo ~/tc/mingw-${{ matrix.compiler }}/bin >> "$GITHUB_PATH" ;;
-            clang*) mkdir -p ~/tc/llvm-mingw
-                    tar -xJf "$RUNNER_TEMP/tc-dl/llvm-mingw-${{ matrix.compiler }}.tar.xz" -C ~/tc/llvm-mingw --strip-components=1
-                    echo ~/tc/llvm-mingw/bin >> "$GITHUB_PATH" ;;
-          esac
+          compiler: ${{ matrix.compiler }}
+          toolchains: ${{ needs.resolve.outputs.gcc_toolchains }}
 
       - name: Cross-build webp4j-windows-x64.dll + webp_bench.exe
         env:
@@ -230,26 +197,132 @@ jobs:
           GIFLIB_SRC: ${{ github.workspace }}/deps/giflib
         run: |
           set -euo pipefail
-          rm -rf webp4j/libwebp && ln -s "$GITHUB_WORKSPACE/libwebp" webp4j/libwebp
           bash libwebp/ci/compiler-bench/build-variant.sh "${{ startsWith(matrix.compiler, 'gcc') && 'gcc' || 'clang' }}" \
             ${{ matrix.variant }} dist/${{ matrix.compiler }}-${{ matrix.variant }}
           cut -c1-400 dist/*/compile-cmds.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: bin-${{ matrix.compiler }}-${{ matrix.variant }}
+          name: ${{ endsWith(matrix.variant, '-pgogen') && 'pgogen' || 'bin' }}-${{ matrix.compiler }}-${{ matrix.variant }}
           path: dist/${{ matrix.compiler }}-${{ matrix.variant }}/
+
+  pgo-train:
+    name: PGO training ${{ matrix.compiler }}
+    needs: [resolve, build]
+    if: ${{ !cancelled() }}   # independent of the other matrix builds
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ${{ fromJSON(needs.resolve.outputs.pgo) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out webp4j ${{ env.WEBP4J_REF }} (training images)
+        uses: actions/checkout@v4
+        with:
+          repository: MrNanko/webp4j
+          ref: ${{ env.WEBP4J_REF }}
+          path: webp4j
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: pgogen-${{ matrix.compiler }}-avx2-lto-pgogen
+          path: gen
+
+      - name: Run the instrumented webp_bench on the training images
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat gen/info.txt
+          python -m pip install --quiet pillow
+          mkdir prof
+          P=$(cygpath -m "$PWD/prof")
+          # GCC: /tmp/pgo/<name>.gcda (PGO_DIR) -> prof/<name>.gcda; Clang: one .profraw per process
+          export GCOV_PREFIX="$P" GCOV_PREFIX_STRIP=2 LLVM_PROFILE_FILE="$P/webp-%p.profraw"
+          mapfile -t IMAGES < <(bash ci/compiler-bench/corpus.sh train)
+          printf 'training image: %s\n' "${IMAGES[@]}"
+          python ci/compiler-bench/bench.py --train gen/webp_bench.exe --images "${IMAGES[@]}" --out train
+          ls prof | head
+          echo "$(ls prof | wc -l) profile files"
+          test -n "$(ls prof)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: profile-${{ matrix.compiler }}
+          path: prof/
+
+  pgo-use:
+    name: build ${{ matrix.compiler }}-avx2-lto-pgo
+    needs: [resolve, gcc-toolchain, pgo-train]
+    if: ${{ !cancelled() }}   # independent of the other matrix builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ${{ fromJSON(needs.resolve.outputs.pgo) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: libwebp
+
+      - name: Check out webp4j ${{ env.WEBP4J_REF }}
+        uses: actions/checkout@v4
+        with:
+          repository: MrNanko/webp4j
+          ref: ${{ env.WEBP4J_REF }}
+          path: webp4j
+          persist-credentials: false
+
+      - uses: ./libwebp/.github/actions/cross-toolchain
+        with:
+          compiler: ${{ matrix.compiler }}
+          toolchains: ${{ needs.resolve.outputs.gcc_toolchains }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: profile-${{ matrix.compiler }}
+          path: /tmp/pgo
+
+      - name: Cross-build with the training profile
+        env:
+          WEBP4J_SRC: ${{ github.workspace }}/webp4j
+          GIFLIB_SRC: ${{ github.workspace }}/deps/giflib
+          PGO_DIR: /tmp/pgo
+        run: |
+          set -euo pipefail
+          if ls /tmp/pgo/*.profraw > /dev/null 2>&1; then
+            llvm-profdata merge -o /tmp/pgo/webp.profdata /tmp/pgo/*.profraw
+            llvm-profdata show /tmp/pgo/webp.profdata | tail -3
+          else
+            echo "$(ls /tmp/pgo/*.gcda | wc -l) .gcda files"
+          fi
+          bash libwebp/ci/compiler-bench/build-variant.sh "${{ startsWith(matrix.compiler, 'gcc') && 'gcc' || 'clang' }}" \
+            avx2-lto-pgo dist/${{ matrix.compiler }}-avx2-lto-pgo
+          cut -c1-400 dist/*/compile-cmds.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.compiler }}-avx2-lto-pgo
+          path: dist/${{ matrix.compiler }}-avx2-lto-pgo/
 
   test:
     name: test ${{ matrix.compiler }}-${{ matrix.variant }}
-    needs: [resolve, build]
+    needs: [resolve, build, pgo-use]
     if: ${{ !cancelled() }}   # test whatever built (a failed build's test fails at its artifact download)
     runs-on: windows-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.resolve.outputs.builds) }}
+        include: ${{ fromJSON(needs.resolve.outputs.tested) }}
     steps:
       - name: Check out webp4j ${{ env.WEBP4J_REF }} (tests)
         uses: actions/checkout@v4
@@ -297,7 +370,7 @@ jobs:
 
   bench:
     name: benchmark (all builds, one runner)
-    needs: [resolve, build]
+    needs: [resolve, build, pgo-use]
     if: ${{ !cancelled() }}   # benchmark whatever built
     runs-on: windows-latest
     timeout-minutes: 240
@@ -330,10 +403,8 @@ jobs:
           for d in dist/bin-*; do mv "$d" "dist/${d#dist/bin-}"; done
           for d in dist/*/; do echo "== $d"; cat "$d/info.txt"; done
           python -m pip install --quiet pillow
-          # corpus: webp4j's test photos (RGB 3.2 MP, RGBA 1 MP) + up to 2 Windows wallpapers (photos)
-          IMAGES="webp4j/src/test/resources/test_rgb.png webp4j/src/test/resources/test_rgba.png"
-          IMAGES="$IMAGES $(find /c/Windows/Web -iname '*.jpg' -size +300k 2>/dev/null | sort | head -2 | tr '\n' ' ')"
-          python ci/compiler-bench/bench.py --builds-dir dist --images $IMAGES --rounds "$ROUNDS" \
+          mapfile -t IMAGES < <(bash ci/compiler-bench/corpus.sh bench)
+          python ci/compiler-bench/bench.py --builds-dir dist --images "${IMAGES[@]}" --rounds "$ROUNDS" \
             --min-time 0.5 --baseline gcc17-base --out bench-results
 
       - uses: actions/upload-artifact@v4
@@ -346,7 +417,7 @@ jobs:
 
   release:
     name: release (fastest tested build)
-    needs: [build, test, bench]
+    needs: [build, pgo-use, test, bench]
     if: ${{ !cancelled() && needs.bench.result == 'success' && (startsWith(github.ref, 'refs/tags/natives-') || inputs.release) }}
     runs-on: ubuntu-24.04
     permissions:
