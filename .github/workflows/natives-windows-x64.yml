@@ -6,7 +6,7 @@ name: Windows x64 natives (GCC snapshot vs Clang nightly) - build, test, benchma
 #                  distribution ships it, so a Linux-hosted x86_64-w64-mingw32 cross toolchain is built
 #                  (ci/compiler-bench/build-gcc-mingw-cross.sh: UCRT, mingw-w64 master) and cached
 #   clang-nightly  llvm-mingw nightly (LLVM main, UCRT, lld) - github.com/mstorsjo/llvm-mingw
-#   (input 'stable': also GCC 16.2 cross + llvm-mingw release with Clang 23 as references)
+#   (input 'stable', always on 'natives-*' tags: also GCC 16.2 cross + llvm-mingw release with Clang 23)
 # each in three variants (ci/compiler-bench/build-variant.sh):
 #   base      webp4j's release defaults (-O3, generic x86-64, libwebp's run-time SSE2/SSE4.1/AVX2 dispatch)
 #   avx2      -O3 -march=x86-64-v3 -ffast-math         (needs an AVX2/FMA/BMI2 CPU: Haswell / Zen 1+)
@@ -66,7 +66,7 @@ jobs:
         name: Pick the GCC snapshot and the build matrix
         env:
           SNAP: ${{ inputs.gcc_snapshot }}
-          STABLE: ${{ inputs.stable }}
+          STABLE: ${{ inputs.stable || startsWith(github.ref, 'refs/tags/natives-') }}   # tags: full set
           RECIPE: ${{ hashFiles('ci/compiler-bench/build-gcc-mingw-cross.sh') }}
         run: |
           set -euo pipefail
@@ -93,7 +93,7 @@ jobs:
 
       - name: Download llvm-mingw and giflib once (the nightly asset is replaced daily)
         env:
-          STABLE: ${{ inputs.stable }}
+          STABLE: ${{ inputs.stable || startsWith(github.ref, 'refs/tags/natives-') }}   # tags: full set
         run: |
           set -euo pipefail
           mkdir -p tc deps
@@ -175,6 +175,7 @@ jobs:
         with:
           repository: MrNanko/webp4j
           ref: ${{ env.WEBP4J_REF }}
+          persist-credentials: false   # no post-job submodule cleanup (libwebp/ becomes a symlink)
           path: webp4j
 
       - uses: actions/download-artifact@v4
@@ -255,6 +256,7 @@ jobs:
         with:
           repository: MrNanko/webp4j
           ref: ${{ env.WEBP4J_REF }}
+          persist-credentials: false   # no post-job submodule cleanup (libwebp/ becomes a symlink)
 
       - uses: actions/setup-java@v4
         with:
@@ -307,6 +309,7 @@ jobs:
         with:
           repository: MrNanko/webp4j
           ref: ${{ env.WEBP4J_REF }}
+          persist-credentials: false   # no post-job submodule cleanup (libwebp/ becomes a symlink)
           path: webp4j
 
       - uses: actions/setup-python@v5

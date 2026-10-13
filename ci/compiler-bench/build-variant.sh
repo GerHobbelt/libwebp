@@ -61,7 +61,8 @@ tool() {  # absolute path of a PATH tool (Windows form when run from MSYS2 bash)
     if command -v cygpath > /dev/null; then cygpath -m "$p"; else echo "$p"; fi
 }
 SYSROOT=$(cd "$(dirname "$(command -v $CC)")/.." && pwd)   # toolchain prefix = find root
-KERNEL32=$(find "$SYSROOT" -name libkernel32.a | head -1)
+KERNEL32=$($CC -print-file-name=libkernel32.a)   # the target's own (llvm-mingw is multi-arch)
+[ -f "$KERNEL32" ] || { echo "libkernel32.a not found" >&2; exit 1; }
 
 echo "::group::configure + build ($CC_KIND $VARIANT)"
 B=$WORK/build
