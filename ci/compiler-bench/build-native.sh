@@ -86,7 +86,7 @@ cp "$HERE/CMakeLists.txt" "$HERE/webp_bench.c" "$SUPER/"
 # ${JNI_LIBRARIES} but uses nothing from libjvm/libjawt, and NEEDED libjvm.so / @rpath/libjvm.dylib
 # would not load outside a JDK). It must be an absolute path: CMake makes a relative FILEPATH absolute.
 if [ "$JNI_LIB" = stub ]; then
-    echo 'int webp4j_jni_stub;' > "$WORK/jnistub.c"
+    echo 'int webp4j_jni_stub(void) { return 0; }' > "$WORK/jnistub.c"   # (a function: macOS ranlib omits common symbols)
     $CC ${MINOS:+-mmacosx-version-min=$MINOS} -c "$WORK/jnistub.c" -o "$WORK/jnistub.o"
     ar rcs "$WORK/libjnistub.a" "$WORK/jnistub.o"
     JNI_LIB=$WORK/libjnistub.a
