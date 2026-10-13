@@ -2,7 +2,7 @@
 # Cross-build (Linux host -> Windows x64 or ARM64) the webp4j JNI library webp4j-windows-<arch>.dll
 # (drop-in for dev.matrixlab.webp4j:webp4j-core) and webp_bench.exe from this libwebp checkout, with one
 # compiler and one optimization variant. Used by .github/workflows/natives-windows-x64.yml (compiler
-# comparison) and natives.yml (portable release builds).
+# comparison; natives.yml builds the release libraries natively with ci/natives/build-native.sh).
 #
 # Usage: build-variant.sh <gcc|clang> <base|avx2|avx2-lto|avx2-lto-pgogen|avx2-lto-pgo> <out-dir>
 #   <TARGET>-{gcc,g++|clang,clang++} must be on PATH. Environment:

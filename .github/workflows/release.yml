@@ -1,10 +1,10 @@
 name: Release
 
-# Builds + tests the webp4j native libraries for all 6 platforms (natives.yml) and the AVX2-optimized
-# Windows x64 benchmark winner (natives-windows-x64.yml, see bench-results.md) from the tagged commit, and
-# publishes a GitHub release (ci/natives/publish-release.sh): the 6 portable libraries,
-# webp4j-windows-x64-avx2.dll, two all-platform drop-in webp4j-core jars (portable / with the AVX2 DLL),
-# build-info.zip, SHA256SUMS.txt and the benchmark results.
+# Builds + tests the webp4j native libraries for all 6 platforms + AVX2 variants for Linux/macOS x64
+# (natives.yml, Clang + LTO + PGO) and the AVX2 Windows x64 benchmark winner (natives-windows-x64.yml,
+# see bench-results.md) from the tagged commit, and publishes a GitHub release
+# (ci/natives/publish-release.sh): the 6 portable libraries, the 3 x64 *-avx2 libraries, two all-platform
+# drop-in webp4j-core jars (portable / x64 AVX2), build-info.zip, SHA256SUMS.txt and the benchmark.
 #
 # How to cut a release (tag scheme Release-<libwebp version>-<webp4j version>-<suffix>):
 #   * Actions tab -> "Release" -> Run workflow -> enter a new tag, e.g. Release-1.6.0-2.5.0-ci2

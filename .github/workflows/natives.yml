@@ -1,18 +1,22 @@
 name: Natives (all platforms) - build + test
 
 # Builds the webp4j JNI library (drop-in for dev.matrixlab.webp4j:webp4j-core 2.5.0; libwebp = this
-# repository) for the 6 platforms webp4j loads, and runs webp4j's JUnit suite with each library on a
-# native runner of that platform:
-#   windows-x64      webp4j-windows-x64.dll      llvm-mingw Clang 23, cross-built on Linux  windows-latest
-#   windows-aarch64  webp4j-windows-aarch64.dll  llvm-mingw Clang 23, cross-built on Linux  windows-11-arm
-#   linux-x64        libwebp4j-linux-x64.so      Clang 23 (apt.llvm.org), Ubuntu 22.04      ubuntu-22.04
-#   linux-aarch64    libwebp4j-linux-aarch64.so  Clang 23 (apt.llvm.org), Ubuntu 22.04      ubuntu-22.04-arm
-#   mac-x64          libwebp4j-mac-x64.dylib     Apple Clang, macOS 10.15+                  macos-15-intel
-#   mac-arm64        libwebp4j-mac-arm64.dylib   Apple Clang, macOS 11+                     macos-15
-# All are portable builds: -O3 -ffast-math + LTO, no -march (libwebp picks its SSE2/SSE4.1/AVX2 or NEON
-# code at run time). The last job collects the 6 tested libraries + their build info into one artifact
-# and fails if any is missing. The AVX2-optimized Windows x64 build comes from natives-windows-x64.yml;
-# release.yml publishes both.
+# repository, giflib static) natively on a GitHub runner of each platform with Clang, LTO and PGO, and
+# runs webp4j's JUnit suite with it on that runner (ci/natives/build-native.sh):
+#   id               runner            file                         compiler
+#   windows-x64      windows-latest    webp4j-windows-x64.dll       llvm-mingw Clang 23 (native)
+#   windows-aarch64  windows-11-arm    webp4j-windows-aarch64.dll   llvm-mingw Clang 23 (native)
+#   linux-x64        ubuntu-22.04      libwebp4j-linux-x64.so       Clang 23 (apt.llvm.org)
+#   linux-aarch64    ubuntu-22.04-arm  libwebp4j-linux-aarch64.so   Clang 23 (apt.llvm.org)
+#   mac-x64          macos-15-intel    libwebp4j-mac-x64.dylib      Xcode Clang, macOS 10.13+
+#   mac-arm64        macos-15          libwebp4j-mac-arm64.dylib    Xcode Clang, macOS 11.0+
+#   linux-x64-avx2, mac-x64-avx2: the same with -march=x86-64-v3 (AVX2/FMA/BMI2 CPUs)
+# Flags: -O3 -ffast-math -flto; the 6 portable libraries have no -march (libwebp picks its SSE2/SSE4.1/
+# AVX2 or NEON code at run time). PGO everywhere: an instrumented build of webp_bench (linked against the
+# same libwebp objects) is trained on the runner with the images of 'ci/compiler-bench/corpus.sh train'
+# (converted once on Windows), then the profile-use build is tested and shipped.
+# The last job collects the 8 tested libraries + their build info into one artifact and fails if any is
+# missing. The AVX2 Windows x64 build comes from natives-windows-x64.yml; release.yml publishes all.
 on:
   push:
     branches-ignore: ['dependabot/**']
@@ -31,36 +35,64 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
-  LLVM_MINGW: '20261006'   # llvm-mingw release with LLVM 23.1.3
-  LLVM_LINUX: '23'         # apt.llvm.org stable
   WEBP4J_REF: 'v2.5.0'
   GIFLIB_REF: '5.2.2'
+  LLVM_VER: '23'               # apt.llvm.org (Linux)
+  LLVM_MINGW_VER: '20261006'   # llvm-mingw release with LLVM 23.1.3 (Windows)
 
 jobs:
-  deps:
-    name: sources + llvm-mingw
-    runs-on: ubuntu-24.04
+  prep:
+    name: PGO training corpus + giflib sources
+    runs-on: windows-latest   # the training images of corpus.sh are the Windows wallpapers
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
     steps:
-      - name: Download llvm-mingw and giflib once
+      - uses: actions/checkout@v4
+
+      - name: Check out webp4j ${{ env.WEBP4J_REF }} (training images)
+        uses: actions/checkout@v4
+        with:
+          repository: MrNanko/webp4j
+          ref: ${{ env.WEBP4J_REF }}
+          path: webp4j
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Convert the training images to .rawi (bench.py's corpus format)
         run: |
           set -euo pipefail
-          mkdir -p tc deps
-          curl -fsSL --retry 5 -o tc/llvm-mingw-clang23.tar.xz \
-            https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW/llvm-mingw-$LLVM_MINGW-ucrt-ubuntu-22.04-x86_64.tar.xz
+          python -m pip install --quiet pillow
+          mapfile -t IMAGES < <(bash ci/compiler-bench/corpus.sh train)
+          printf 'training image: %s\n' "${IMAGES[@]}"
+          python - "${IMAGES[@]}" <<'EOF'
+          import sys
+          sys.path.insert(0, "ci/compiler-bench")
+          import bench
+          bench.make_corpus(sys.argv[1:], "corpus", 4.0)
+          EOF
+          ls -l corpus
+          test "$(ls corpus/*.rawi | wc -l)" -ge 3
+
+      - name: giflib ${{ env.GIFLIB_REF }} sources
+        run: |
+          set -euo pipefail
           for i in 1 2 3 4; do
-            git clone -q --depth 1 --branch "$GIFLIB_REF" https://git.code.sf.net/p/giflib/code deps/giflib && break
+            git -c core.autocrlf=false clone -q --depth 1 --branch "$GIFLIB_REF" https://git.code.sf.net/p/giflib/code deps/giflib && break
             rm -rf deps/giflib; sleep 30
           done
           test -f deps/giflib/gif_lib.h
           rm -rf deps/giflib/.git
-          ls -l tc
 
       - uses: actions/upload-artifact@v4
         with:
-          name: natives-tc
-          path: tc/
+          name: natives-pgo-corpus
+          path: corpus/
           retention-days: 3
-          compression-level: 0
 
       - uses: actions/upload-artifact@v4
         with:
@@ -68,232 +100,174 @@ jobs:
           path: deps/
           retention-days: 3
 
-  windows:
-    name: build windows-${{ matrix.arch }}
-    needs: deps
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { arch: x64,     target: x86_64-w64-mingw32 }
-          - { arch: aarch64, target: aarch64-w64-mingw32 }
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: libwebp
-
-      - name: Check out webp4j ${{ env.WEBP4J_REF }}
-        uses: actions/checkout@v4
-        with:
-          repository: MrNanko/webp4j
-          ref: ${{ env.WEBP4J_REF }}
-          path: webp4j
-          persist-credentials: false
-
-      - uses: ./libwebp/.github/actions/cross-toolchain
-        with:
-          compiler: clang23
-          deps-artifact: natives-deps
-          tc-artifact: natives-tc
-
-      - name: Cross-build
-        env:
-          TARGET: ${{ matrix.target }}
-          WEBP4J_SRC: ${{ github.workspace }}/webp4j
-          GIFLIB_SRC: ${{ github.workspace }}/deps/giflib
-        run: bash libwebp/ci/compiler-bench/build-variant.sh clang portable dist/windows-${{ matrix.arch }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-windows-${{ matrix.arch }}
-          path: dist/windows-${{ matrix.arch }}/
-
-  linux:
-    name: build linux-${{ matrix.arch }}
-    needs: deps
+  build:
+    name: ${{ matrix.id }}
+    needs: prep
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { arch: x64,     runner: ubuntu-22.04 }
-          - { arch: aarch64, runner: ubuntu-22.04-arm }
+          - { id: windows-x64,     platform: windows-x64,     runner: windows-latest,   lib: webp4j-windows-x64.dll,     cpu: portable,  mingw: x86_64 }
+          - { id: windows-aarch64, platform: windows-aarch64, runner: windows-11-arm,   lib: webp4j-windows-aarch64.dll, cpu: portable,  mingw: aarch64 }
+          - { id: linux-x64,       platform: linux-x64,       runner: ubuntu-22.04,     lib: libwebp4j-linux-x64.so,     cpu: portable }
+          - { id: linux-aarch64,   platform: linux-aarch64,   runner: ubuntu-22.04-arm, lib: libwebp4j-linux-aarch64.so, cpu: portable }
+          - { id: mac-x64,         platform: mac-x64,         runner: macos-15-intel,   lib: libwebp4j-mac-x64.dylib,    cpu: portable }
+          - { id: mac-arm64,       platform: mac-arm64,       runner: macos-15,         lib: libwebp4j-mac-arm64.dylib,  cpu: portable }
+          - { id: linux-x64-avx2,  platform: linux-x64,       runner: ubuntu-22.04,     lib: libwebp4j-linux-x64.so,     cpu: x86-64-v3 }
+          - { id: mac-x64-avx2,    platform: mac-x64,         runner: macos-15-intel,   lib: libwebp4j-mac-x64.dylib,    cpu: x86-64-v3 }
+    env:
+      WEBP4J_SRC: ${{ github.workspace }}/webp4j
+      GIFLIB_SRC: ${{ github.workspace }}/deps/giflib
+      PGO_DIR: ${{ github.workspace }}/pgo
+      CPU: ${{ matrix.cpu }}
     steps:
       - uses: actions/checkout@v4
         with:
           path: libwebp
 
-      - name: Check out webp4j ${{ env.WEBP4J_REF }}
+      - name: Check out webp4j ${{ env.WEBP4J_REF }} (JNI glue + CMakeLists + tests; its libwebp/ -> this repository)
         uses: actions/checkout@v4
         with:
           repository: MrNanko/webp4j
           ref: ${{ env.WEBP4J_REF }}
           path: webp4j
-          persist-credentials: false
+          persist-credentials: false   # no post-job submodule cleanup (libwebp/ is replaced)
 
       - uses: actions/download-artifact@v4
         with:
           name: natives-deps
           path: deps
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Install Clang ${{ env.LLVM_LINUX }} (apt.llvm.org) + Ninja
-        run: |
-          set -euo pipefail
-          sudo apt-get update -q
-          sudo apt-get install -y -q ninja-build lsb-release wget software-properties-common gnupg
-          wget -q https://apt.llvm.org/llvm.sh
-          sudo bash llvm.sh "$LLVM_LINUX"
-          echo "/usr/lib/llvm-$LLVM_LINUX/bin" >> "$GITHUB_PATH"
-
-      - name: Build
-        env:
-          WEBP4J_SRC: ${{ github.workspace }}/webp4j
-          GIFLIB_SRC: ${{ github.workspace }}/deps/giflib
-          CC: clang
-          AR: llvm-ar
-          RANLIB: llvm-ranlib
-          LINK_FLAGS: -fuse-ld=lld -Wl,--as-needed
-        run: |
-          set -euo pipefail
-          rm -rf webp4j/libwebp && ln -s "$GITHUB_WORKSPACE/libwebp" webp4j/libwebp
-          bash libwebp/ci/natives/build-native.sh dist/linux-${{ matrix.arch }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-linux-${{ matrix.arch }}
-          path: dist/linux-${{ matrix.arch }}/
-
-  macos:
-    name: build mac-${{ matrix.arch }}
-    needs: deps
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { arch: x64,   runner: macos-15-intel, target: '10.15' }
-          - { arch: arm64, runner: macos-15,       target: '11.0' }
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: libwebp
-
-      - name: Check out webp4j ${{ env.WEBP4J_REF }}
-        uses: actions/checkout@v4
-        with:
-          repository: MrNanko/webp4j
-          ref: ${{ env.WEBP4J_REF }}
-          path: webp4j
-          persist-credentials: false
-
       - uses: actions/download-artifact@v4
         with:
-          name: natives-deps
-          path: deps
+          name: natives-pgo-corpus
+          path: corpus
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Set up Ninja
-        uses: seanmiddleditch/gha-setup-ninja@v6
-
-      - name: Build
-        env:
-          WEBP4J_SRC: ${{ github.workspace }}/webp4j
-          GIFLIB_SRC: ${{ github.workspace }}/deps/giflib
-          CC: clang
-          OSX_TARGET: ${{ matrix.target }}
-          LINK_FLAGS: -Wl,-dead_strip_dylibs
-        run: |
-          set -euo pipefail
-          rm -rf webp4j/libwebp && ln -s "$GITHUB_WORKSPACE/libwebp" webp4j/libwebp
-          bash libwebp/ci/natives/build-native.sh dist/mac-${{ matrix.arch }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-mac-${{ matrix.arch }}
-          path: dist/mac-${{ matrix.arch }}/
-
-  test:
-    name: test ${{ matrix.platform }}
-    needs: [windows, linux, macos]
-    if: ${{ !cancelled() }}   # test whatever built
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { platform: windows-x64,     runner: windows-latest,   lib: webp4j-windows-x64.dll }
-          - { platform: windows-aarch64, runner: windows-11-arm,   lib: webp4j-windows-aarch64.dll }
-          - { platform: linux-x64,       runner: ubuntu-22.04,     lib: libwebp4j-linux-x64.so }
-          - { platform: linux-aarch64,   runner: ubuntu-22.04-arm, lib: libwebp4j-linux-aarch64.so }
-          - { platform: mac-x64,         runner: macos-15-intel,   lib: libwebp4j-mac-x64.dylib }
-          - { platform: mac-arm64,       runner: macos-15,         lib: libwebp4j-mac-arm64.dylib }
-    steps:
-      - name: Check out webp4j ${{ env.WEBP4J_REF }} (tests)
-        uses: actions/checkout@v4
-        with:
-          repository: MrNanko/webp4j
-          ref: ${{ env.WEBP4J_REF }}
-          persist-credentials: false
-
-      - uses: actions/setup-java@v4
+      - name: Set up JDK 21 (jni.h + the JUnit run)
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
+          cache-dependency-path: webp4j/pom.xml
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: native-${{ matrix.platform }}
-          path: xbuild
-
-      - name: Run webp4j's JUnit suite with the built library
-        shell: bash
+      - name: Toolchain (Linux) - LLVM ${{ env.LLVM_VER }} from apt.llvm.org, Ninja
+        if: runner.os == 'Linux'
         run: |
-          set -euxo pipefail
-          cat xbuild/info.txt
+          set -euo pipefail
+          CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          curl -fsSL --retry 5 https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+          echo "deb http://apt.llvm.org/$CODENAME/ llvm-toolchain-$CODENAME-$LLVM_VER main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends clang-$LLVM_VER lld-$LLVM_VER llvm-$LLVM_VER \
+            libclang-rt-$LLVM_VER-dev ninja-build
+          echo "/usr/lib/llvm-$LLVM_VER/bin" >> "$GITHUB_PATH"
+
+      - name: Toolchain (macOS) - Xcode clang, Ninja
+        if: runner.os == 'macOS'
+        run: |
+          command -v ninja > /dev/null || brew install ninja
+          xcode-select -p
+          xcrun --find llvm-profdata
+
+      - name: Toolchain (Windows) - llvm-mingw ${{ env.LLVM_MINGW_VER }} (native ${{ matrix.mingw }} host)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $v = $env:LLVM_MINGW_VER
+          $zip = "$env:RUNNER_TEMP\llvm-mingw.zip"
+          curl.exe -fsSL --retry 5 -o $zip "https://github.com/mstorsjo/llvm-mingw/releases/download/$v/llvm-mingw-$v-ucrt-${{ matrix.mingw }}.zip"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          New-Item -ItemType Directory -Force C:\llvm-mingw-root | Out-Null
+          tar.exe -xf $zip -C C:\llvm-mingw-root
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $dir = (Get-ChildItem C:\llvm-mingw-root -Directory | Select-Object -First 1).FullName
+          "$dir\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Toolchain info, Maven; point webp4j/libwebp to this repository
+        run: |
+          set -eu +o pipefail   # '| head' may close a pipe early
+          case "${{ matrix.platform }}" in windows-*) CC=${{ matrix.mingw }}-w64-mingw32-clang ;; *) CC=clang ;; esac
+          command -v $CC
+          $CC --version
+          cmake --version | head -1
+          echo "ninja $(ninja --version)"
+          java -version 2>&1 | head -2
+          if ! command -v mvn > /dev/null; then   # not on every runner image
+            curl -fsSL --retry 5 https://archive.apache.org/dist/maven/maven-3/3.9.11/binaries/apache-maven-3.9.11-bin.tar.gz | tar -xz -C "$HOME"
+            echo "$HOME/apache-maven-3.9.11/bin" >> "$GITHUB_PATH"
+            "$HOME/apache-maven-3.9.11/bin/mvn" -v | head -1
+          else
+            mvn -v | head -1
+          fi
+          rm -rf webp4j/libwebp
+          if [ "$RUNNER_OS" = Windows ]; then cp -R libwebp webp4j/libwebp; else ln -s "$PWD/libwebp" webp4j/libwebp; fi
+          test -f webp4j/libwebp/src/webp/encode.h
+
+      - name: PGO 1/3 - instrumented build (pgogen)
+        run: |
+          bash libwebp/ci/natives/build-native.sh ${{ matrix.platform }} pgogen dist/pgogen
+          cut -c1-400 dist/pgogen/compile-cmds.txt
+
+      - name: PGO 2/3 - train the instrumented webp_bench on the corpus
+        run: |
+          set -euo pipefail
+          wp() { if command -v cygpath > /dev/null; then cygpath -m "$1"; else printf '%s\n' "$1"; fi; }
+          P=$(wp "$PGO_DIR")
+          rm -rf "$P" train && mkdir -p "$P" train
+          export LLVM_PROFILE_FILE="$P/webp-%p.profraw"
+          BENCH=dist/pgogen/webp_bench
+          if [ -f "$BENCH.exe" ]; then BENCH=$BENCH.exe; fi
+          "$BENCH" -t 0 -o train corpus/*.rawi    # encode (+ lossless round trip), writes q75 + lossless .webp
+          "$BENCH" -t 0 train/*.webp              # decode them
+          if [ "$RUNNER_OS" = macOS ]; then PROFDATA="xcrun llvm-profdata"; else PROFDATA=llvm-profdata; fi
+          $PROFDATA merge -o "$P/webp.profdata" "$P"/*.profraw
+          $PROFDATA show "$P/webp.profdata" | tail -4
+
+      - name: PGO 3/3 - profile-use build
+        run: |
+          bash libwebp/ci/natives/build-native.sh ${{ matrix.platform }} pgo dist/ship
+          cut -c1-400 dist/ship/compile-cmds.txt
+
+      - name: webp4j JUnit suite against ${{ matrix.lib }} (native JVM)
+        working-directory: webp4j
+        run: |
+          set -eux
           mkdir -p src/main/resources/native
           test -z "$(ls -A src/main/resources/native)"   # nothing else that could be loaded instead
-          cp "xbuild/${{ matrix.lib }}" src/main/resources/native/
-          MVN=mvn
-          if ! command -v mvn > /dev/null; then   # not preinstalled on every runner image
-            curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz \
-              | tar -xz -C "$RUNNER_TEMP"
-            MVN="$RUNNER_TEMP/apache-maven-3.9.9/bin/mvn"
-          fi
-          "$MVN" -B -ntp test
+          cp ../dist/ship/${{ matrix.lib }} src/main/resources/native/
+          mvn -B -ntp test
 
-      - name: Mark the library as tested
-        shell: bash
-        run: mkdir ok && cp xbuild/info.txt ok/
+      - name: Collect ${{ matrix.lib }} + info.txt
+        run: |
+          mkdir out
+          cp dist/ship/${{ matrix.lib }} dist/ship/info.txt out/
+          ls -l out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: natives-ok-${{ matrix.platform }}
-          path: ok/
+          name: native-${{ matrix.id }}
+          path: out/
 
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: natives-surefire-${{ matrix.platform }}
-          path: target/surefire-reports/
+          name: natives-logs-${{ matrix.id }}
+          path: |
+            dist/*/*.log
+            dist/*/*.txt
+            webp4j/target/surefire-reports/
+          if-no-files-found: ignore
 
   collect:
-    name: all natives (6 tested libraries)
-    needs: test
+    name: all natives (8 tested libraries)
+    needs: build
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     steps:
@@ -302,26 +276,27 @@ jobs:
           pattern: native-*
           path: a
 
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: natives-ok-*
-          path: a
-
-      - name: Check that every platform was built and tested
+      - name: Check that every library was built and tested
         run: |
           set -u
           mkdir out
           missing=0
-          for p in windows-x64:webp4j-windows-x64.dll windows-aarch64:webp4j-windows-aarch64.dll \
-                   linux-x64:libwebp4j-linux-x64.so linux-aarch64:libwebp4j-linux-aarch64.so \
-                   mac-x64:libwebp4j-mac-x64.dylib mac-arm64:libwebp4j-mac-arm64.dylib; do
-            plat=${p%%:*} lib=${p#*:}
-            if [ -f "a/native-$plat/$lib" ] && [ -d "a/natives-ok-$plat" ]; then
-              cp "a/native-$plat/$lib" out/
-              cp "a/native-$plat/info.txt" "out/info-$plat.txt"
-              echo "OK       $plat  $(grep -E '^(compiler|requires):' "out/info-$plat.txt" | cut -c11- | tr '\n' ' ')"
+          # id:file in the job artifact:file in the release (AVX2 variants get an -avx2 suffix)
+          for e in windows-x64:webp4j-windows-x64.dll:webp4j-windows-x64.dll \
+                   windows-aarch64:webp4j-windows-aarch64.dll:webp4j-windows-aarch64.dll \
+                   linux-x64:libwebp4j-linux-x64.so:libwebp4j-linux-x64.so \
+                   linux-aarch64:libwebp4j-linux-aarch64.so:libwebp4j-linux-aarch64.so \
+                   mac-x64:libwebp4j-mac-x64.dylib:libwebp4j-mac-x64.dylib \
+                   mac-arm64:libwebp4j-mac-arm64.dylib:libwebp4j-mac-arm64.dylib \
+                   linux-x64-avx2:libwebp4j-linux-x64.so:libwebp4j-linux-x64-avx2.so \
+                   mac-x64-avx2:libwebp4j-mac-x64.dylib:libwebp4j-mac-x64-avx2.dylib; do
+            IFS=: read -r id lib dst <<< "$e"
+            if [ -f "a/native-$id/$lib" ]; then
+              cp "a/native-$id/$lib" "out/$dst"
+              cp "a/native-$id/info.txt" "out/info-$id.txt"
+              echo "OK       $id  $(grep -E '^(compiler|requires):' "out/info-$id.txt" | cut -c11- | sed -E 's/ \(.*//' | tr '\n' ' ')"
             else
-              echo "::error::$plat: library missing or webp4j tests failed"; missing=1
+              echo "::error::$id: library missing (build or webp4j tests failed)"; missing=1
             fi
           done
           ls -l out
