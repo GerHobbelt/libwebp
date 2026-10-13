@@ -13,3 +13,6 @@ add_subdirectory(${WEBP4J_DIR} webp4j)
 
 add_executable(webp_bench webp_bench.c)
 target_link_libraries(webp_bench PRIVATE webp)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(webp_bench PRIVATE m)  # libwebp's static targets do not carry -lm
+endif()
