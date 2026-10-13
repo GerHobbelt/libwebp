@@ -48,13 +48,13 @@ esac
 MINOS=""
 case $PLATFORM in
     linux-x64|linux-aarch64)
-        CC=clang; CXX=clang++; LIB=libwebp4j-$PLATFORM.so; EXE=webp_bench; JNI_OS=linux; JNI_LIB=m
+        CC=clang; CXX=clang++; LIB=libwebp4j-$PLATFORM.so; EXE=webp_bench; JNI_OS=linux; JNI_LIB=stub
         LDFLAGS="-fuse-ld=lld -static-libgcc"
         # -lm for webp_bench: with -ffast-math libwebp's pow() probe links without libm, so libwebp's
         # targets do not carry -lm (the JNI library links it itself)
         EXTRA=(-DCMAKE_AR="$(tool llvm-ar)" -DCMAKE_RANLIB="$(tool llvm-ranlib)" -DCMAKE_C_STANDARD_LIBRARIES=-lm) ;;
     mac-x64|mac-arm64)
-        CC=clang; CXX=clang++; LIB=libwebp4j-$PLATFORM.dylib; EXE=webp_bench; JNI_OS=darwin; JNI_LIB=m
+        CC=clang; CXX=clang++; LIB=libwebp4j-$PLATFORM.dylib; EXE=webp_bench; JNI_OS=darwin; JNI_LIB=stub
         LDFLAGS=""
         if [ "$PLATFORM" = mac-x64 ]; then MINOS=10.13; OSXARCH=x86_64; else MINOS=11.0; OSXARCH=arm64; fi
         OPT="$OPT -mmacosx-version-min=$MINOS"
@@ -78,12 +78,19 @@ case $VARIANT in
     *) echo "unknown variant: $VARIANT" >&2; exit 2 ;;
 esac
 
-# Unix: FindJNI's library variables -> libm (webp4j links ${JNI_LIBRARIES} but uses nothing from
-# libjvm/libjawt, and NEEDED libjvm.so / @rpath/libjvm.dylib would not load outside a JDK).
 # The superbuild copy lives at ONE path for all variants (PGO profiles are tied to source paths).
 SUPER=$(dirname "$OUT")/superbuild-src
 rm -rf "$WORK" "$SUPER" && mkdir -p "$WORK" "$SUPER"
 cp "$HERE/CMakeLists.txt" "$HERE/webp_bench.c" "$SUPER/"
+# Unix: FindJNI's library variables -> an archive whose only object is never pulled in (webp4j links
+# ${JNI_LIBRARIES} but uses nothing from libjvm/libjawt, and NEEDED libjvm.so / @rpath/libjvm.dylib
+# would not load outside a JDK). It must be an absolute path: CMake makes a relative FILEPATH absolute.
+if [ "$JNI_LIB" = stub ]; then
+    echo 'int webp4j_jni_stub;' > "$WORK/jnistub.c"
+    $CC ${MINOS:+-mmacosx-version-min=$MINOS} -c "$WORK/jnistub.c" -o "$WORK/jnistub.o"
+    ar rcs "$WORK/libjnistub.a" "$WORK/jnistub.o"
+    JNI_LIB=$WORK/libjnistub.a
+fi
 
 echo "::group::configure + build ($PLATFORM $VARIANT)"
 cmake -S "$(wp "$SUPER")" -B "$(wp "$B")" -G Ninja \
