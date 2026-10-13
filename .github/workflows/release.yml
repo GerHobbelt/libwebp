@@ -1,0 +1,82 @@
+name: Release
+
+# Builds + tests the webp4j native libraries for all 6 platforms (natives.yml) and the AVX2-optimized
+# Windows x64 benchmark winner (natives-windows-x64.yml, see bench-results.md) from the tagged commit, and
+# publishes a GitHub release (ci/natives/publish-release.sh): the 6 portable libraries,
+# webp4j-windows-x64-avx2.dll, two all-platform drop-in webp4j-core jars (portable / with the AVX2 DLL),
+# build-info.zip, SHA256SUMS.txt and the benchmark results.
+#
+# How to cut a release (tag scheme Release-<libwebp version>-<webp4j version>-<suffix>):
+#   * Actions tab -> "Release" -> Run workflow -> enter a new tag, e.g. Release-1.6.0-2.5.0-ci2
+#     (created on the selected branch's head commit)
+#   * or push a tag:  git tag Release-1.6.0-2.5.0-ci2 && git push origin Release-1.6.0-2.5.0-ci2
+on:
+  push:
+    tags: ['Release-*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create, e.g. Release-1.6.0-2.5.0-ci2'
+        required: true
+      prerelease:
+        description: 'Mark as pre-release'
+        type: boolean
+        default: true
+      avx2_build:
+        description: 'AVX2 Windows x64 build to ship (natives-windows-x64.yml build name)'
+        default: 'clang-nightly-avx2-lto-pgo'
+
+permissions:
+  contents: write
+
+jobs:
+  natives:
+    uses: ./.github/workflows/natives.yml
+
+  windows-x64-avx2:
+    uses: ./.github/workflows/natives-windows-x64.yml
+    with:
+      only: ${{ inputs.avx2_build || 'clang-nightly-avx2-lto-pgo' }}   # benchmark winner, bench-results.md
+      bench: false
+
+  publish:
+    name: publish GitHub release
+    needs: [natives, windows-x64-avx2]
+    runs-on: ubuntu-24.04
+    env:
+      AVX2_BUILD: ${{ inputs.avx2_build || 'clang-nightly-avx2-lto-pgo' }}
+      WEBP4J_REF: 'v2.5.0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out webp4j (drop-in jars)
+        uses: actions/checkout@v4
+        with:
+          repository: MrNanko/webp4j
+          ref: ${{ env.WEBP4J_REF }}
+          path: webp4j
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: webp4j/pom.xml
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: natives-all
+          path: natives
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-${{ env.AVX2_BUILD }}
+          path: avx2
+
+      - name: Assemble + publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          PRERELEASE: ${{ inputs.prerelease && '--prerelease' || '' }}
+        run: bash ci/natives/publish-release.sh

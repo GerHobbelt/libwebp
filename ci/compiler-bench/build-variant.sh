@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# Cross-build (Linux host -> Windows x64) the webp4j JNI library webp4j-windows-x64.dll (drop-in for
-# dev.matrixlab.webp4j:webp4j-core) and webp_bench.exe from this libwebp checkout, with one compiler and
-# one optimization variant. Used by .github/workflows/natives-windows-x64.yml.
+# Cross-build (Linux host -> Windows x64 or ARM64) the webp4j JNI library webp4j-windows-<arch>.dll
+# (drop-in for dev.matrixlab.webp4j:webp4j-core) and webp_bench.exe from this libwebp checkout, with one
+# compiler and one optimization variant. Used by .github/workflows/natives-windows-x64.yml (compiler
+# comparison) and natives.yml (portable release builds).
 #
 # Usage: build-variant.sh <gcc|clang> <base|avx2|avx2-lto|avx2-lto-pgogen|avx2-lto-pgo> <out-dir>
-#   x86_64-w64-mingw32-{gcc,g++|clang,clang++} must be on PATH. Environment:
+#   <TARGET>-{gcc,g++|clang,clang++} must be on PATH. Environment:
+#     TARGET      x86_64-w64-mingw32 (default) or aarch64-w64-mingw32 (clang only)
 #     WEBP4J_SRC  webp4j source tree whose libwebp/ points to this repository
 #     GIFLIB_SRC  giflib 5.2.2 source tree (webp4j's FetchContent dependency)
 #     JAVA_HOME   any JDK (only the platform-independent jni.h is used)
 #     PGO_DIR     profile directory of the pgo variants (default /tmp/pgo; same path for gen and use):
 #                 GCC writes/reads <PGO_DIR>/<mangled object path>.gcda, Clang reads <PGO_DIR>/webp.profdata
 # Variants:
+#   portable  release builds for every CPU: -O3 -ffast-math + LTO, no -march (libwebp dispatches its
+#             SSE2/SSE4.1/AVX2 or NEON code at run time)
 #   base      webp4j's release defaults: -O3, LTO for the JNI glue only, generic x86-64 (libwebp still
 #             picks its SSE2/SSE4.1/AVX2 code at run time)
 #   avx2      -O3 -march=x86-64-v3 (AVX2/FMA/BMI2: Intel Haswell+, AMD Zen+) -ffast-math (implies
@@ -26,7 +30,12 @@ OUT=$(mkdir -p "$3" && cd "$3" && pwd -P)
 HERE=$(cd "$(dirname "$0")" && pwd)
 WORK=$(dirname "$OUT")/work-$(basename "$OUT")   # build trees stay out of the uploaded OUT dir
 B=$WORK/build
-T=x86_64-w64-mingw32
+T=${TARGET:-x86_64-w64-mingw32}
+case $T in
+    x86_64-*)  PROC=AMD64 ;;
+    aarch64-*) PROC=ARM64 ;;   # webp4j names it webp4j-windows-aarch64.dll
+    *) echo "unknown target: $T" >&2; exit 2 ;;
+esac
 PGO_DIR=${PGO_DIR:-/tmp/pgo}
 : "${WEBP4J_SRC:?}" "${GIFLIB_SRC:?}" "${JAVA_HOME:?}"
 
@@ -46,6 +55,7 @@ case $CC_KIND in
 esac
 AVX2="-O3 -march=x86-64-v3 -ffast-math"
 case $VARIANT in
+    portable)        PERF="-O3 -ffast-math $LTO" ;;
     base)            PERF="" ;;
     avx2)            PERF="$AVX2" ;;
     avx2-lto)        PERF="$AVX2 $LTO" ;;
@@ -86,7 +96,7 @@ KERNEL32=$($CC -print-file-name=libkernel32.a)   # the target's own (llvm-mingw 
 
 echo "::group::configure + build ($CC_KIND $VARIANT)"
 cmake -S "$SUPER" -B "$B" -G Ninja \
-    -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 \
+    -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=$PROC \
     -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX -DCMAKE_RC_COMPILER=$T-windres \
     -DCMAKE_AR="$(tool $AR)" -DCMAKE_RANLIB="$(tool $RANLIB)" \
     -DCMAKE_FIND_ROOT_PATH="$SYSROOT" -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
@@ -104,7 +114,8 @@ cmake --build "$B" -j"$(nproc)" -v > "$OUT/build.log" 2>&1 || {
     awk '/^FAILED/{p=1} /^\[[0-9]+\/[0-9]+\]/{p=0} p' "$OUT/build.log" | cut -c1-600 | head -150; exit 1; }
 echo "::endgroup::"
 
-DLL=$(find "$B" -name webp4j-windows-x64.dll | head -1)
+DLL=$(find "$B" -name 'webp4j-windows-*.dll' | head -1)
+NAME=$(basename "$DLL")
 EXE=$(find "$B" -name webp_bench.exe | head -1)
 cp "$DLL" "$EXE" "$OUT/"
 # effective compile lines (the last -O wins): a libwebp encoder file, an AVX2 file and the JNI glue
@@ -113,14 +124,14 @@ for f in src/enc/vp8l_enc.c src/dsp/lossless_avx2.c src/main/c/webp4j.c; do
 done > "$OUT/compile-cmds.txt"
 
 OBJDUMP=$(command -v $T-objdump || command -v llvm-objdump)
-"$OBJDUMP" -p "$OUT/webp4j-windows-x64.dll" > "$WORK/dll-headers.txt"
+"$OBJDUMP" -p "$OUT/$NAME" > "$WORK/dll-headers.txt"
 grep -E 'file format|DLL Name' "$WORK/dll-headers.txt" || true
 if grep -iE 'DLL Name: *lib' "$WORK/dll-headers.txt"; then
-    echo "::error::webp4j-windows-x64.dll depends on a MinGW runtime DLL"; exit 1
+    echo "::error::$NAME depends on a MinGW runtime DLL"; exit 1
 fi
 EXPORTS=$(grep -c 'Java_dev_matrixlab_webp4j_internal_NativeWebP_' "$WORK/dll-headers.txt" || true)
 [ "$EXPORTS" -ge 10 ] || { echo "::error::expected 10 JNI exports, found $EXPORTS"; exit 1; }
-YMM=$("$OBJDUMP" -d --no-show-raw-insn "$OUT/webp4j-windows-x64.dll" | grep -c ymm || true)
+YMM=$("$OBJDUMP" -d --no-show-raw-insn "$OUT/$NAME" | grep -c ymm || true)
 {
     echo "compiler: $($CC --version | head -1)"
     echo "variant:  $VARIANT"

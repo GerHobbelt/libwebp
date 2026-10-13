@@ -16,8 +16,8 @@ name: Windows x64 natives (GCC snapshot vs Clang nightly) - build, test, benchma
 # Builds are cross-compiled on Linux; every DLL then runs webp4j's JUnit suite on a native Windows x64
 # JVM, and all builds are benchmarked on ONE Windows runner in interleaved rounds
 # (ci/compiler-bench/bench.py; results in the job summary + artifact).
-# Release: push a tag 'natives-*' or run the workflow with 'release' checked -> GitHub (pre)release with
-# the fastest tested DLL as webp4j-windows-x64.dll plus every tested build and the benchmark report.
+# Release: release.yml calls this workflow with only=<benchmark winner> and bench=false; the winner's
+# DLL ships as webp4j-windows-x64-avx2.dll next to the portable libraries of natives.yml.
 on:
   workflow_dispatch:
     inputs:
@@ -28,17 +28,33 @@ on:
         description: 'Also build stable GCC 16.2 + Clang 23 as references'
         type: boolean
         default: false
+      only:
+        description: 'Only this build, e.g. clang-nightly-avx2-lto-pgo (empty = full comparison)'
+        default: ''
+      bench:
+        description: 'Run the benchmark'
+        type: boolean
+        default: true
       rounds:
         description: 'Benchmark rounds (interleaved)'
         default: '5'
-      release:
-        description: 'Publish a GitHub release with the results'
+  workflow_call:   # release.yml: only=<benchmark winner>, bench=false
+    inputs:
+      gcc_snapshot:
+        type: string
+        default: ''
+      stable:
         type: boolean
         default: false
-  push:
-    branches: ['compiler-bench']
-    tags: ['natives-*']
-    paths-ignore: ['**.md']   # (not applied to tag pushes)
+      only:
+        type: string
+        default: ''
+      bench:
+        type: boolean
+        default: true
+      rounds:
+        type: string
+        default: '5'
 
 permissions:
   contents: read
@@ -71,30 +87,43 @@ jobs:
         name: Pick the GCC snapshot and the build matrix
         env:
           SNAP: ${{ inputs.gcc_snapshot }}
-          STABLE: ${{ inputs.stable || startsWith(github.ref, 'refs/tags/natives-') }}   # tags: full set
+          STABLE: ${{ inputs.stable }}
+          ONLY: ${{ inputs.only }}
           RECIPE: ${{ hashFiles('ci/compiler-bench/build-gcc-mingw-cross.sh') }}
         run: |
           set -euo pipefail
-          if [ -z "$SNAP" ]; then
-            SNAP=$(curl -fsSL --retry 5 https://gcc.gnu.org/pub/gcc/snapshots/LATEST-17/ | grep -oE 'gcc-17-[0-9]{8}' | head -1)
+          if [ -n "$ONLY" ]; then
+            [[ $ONLY =~ ^(gcc17|gcc16|clang-nightly|clang23)-(base|avx2|avx2-lto|avx2-lto-pgo)$ ]] \
+              || { echo "::error::unknown build '$ONLY'"; exit 1; }
+            comps=${BASH_REMATCH[1]} variants=${BASH_REMATCH[2]}
+          else
+            comps="gcc17 clang-nightly" variants="base avx2 avx2-lto avx2-lto-pgo"
+            [ "$STABLE" != "true" ] || comps="$comps gcc16 clang23"
           fi
-          test -n "$SNAP"
           tc() {  # name version url -> JSON (the cache key is shared by the toolchain and build jobs)
-            echo "{\"name\":\"$1\",\"ver\":\"$2\",\"url\":\"$3\",\"key\":\"mingw-cross-$2-binutils$BINUTILS_VER-$MINGW_VER-$RECIPE\"}"
+            echo "{\"name\":\"$1\",\"ver\":\"$2\",\"url\":\"$3\",\"key\":\"mingw-cross-$2-binutils$BINUTILS_VER-$MINGW_VER-$RECIPE\"},"
           }
-          tcs=$(tc gcc17 "$SNAP" "https://gcc.gnu.org/pub/gcc/snapshots/${SNAP#gcc-}/$SNAP.tar.xz")
-          comps="gcc17 clang-nightly"
-          if [ "$STABLE" = "true" ]; then
-            tcs="$tcs,$(tc gcc16 "$GCC_STABLE" "https://gcc.gnu.org/pub/gcc/releases/$GCC_STABLE/$GCC_STABLE.tar.xz")"
-            comps="$comps gcc16 clang23"
+          tcs=""
+          if [[ " $comps " == *" gcc17 "* ]]; then
+            if [ -z "$SNAP" ]; then
+              SNAP=$(curl -fsSL --retry 5 https://gcc.gnu.org/pub/gcc/snapshots/LATEST-17/ | grep -oE 'gcc-17-[0-9]{8}' | head -1)
+            fi
+            test -n "$SNAP"
+            tcs=$tcs$(tc gcc17 "$SNAP" "https://gcc.gnu.org/pub/gcc/snapshots/${SNAP#gcc-}/$SNAP.tar.xz")
+          fi
+          if [[ " $comps " == *" gcc16 "* ]]; then
+            tcs=$tcs$(tc gcc16 "$GCC_STABLE" "https://gcc.gnu.org/pub/gcc/releases/$GCC_STABLE/$GCC_STABLE.tar.xz")
           fi
           builds=""; tested=""; pgo=""   # build job / test + bench / PGO training + profile-use jobs
           for c in $comps; do
-            for v in base avx2 avx2-lto avx2-lto-pgogen; do builds="$builds{\"compiler\":\"$c\",\"variant\":\"$v\"},"; done
-            for v in base avx2 avx2-lto avx2-lto-pgo; do tested="$tested{\"compiler\":\"$c\",\"variant\":\"$v\"},"; done
-            pgo="$pgo\"$c\","
+            for v in $variants; do
+              b=$v; [ "$v" != avx2-lto-pgo ] || { b=avx2-lto-pgogen; pgo="$pgo\"$c\","; }
+              builds="$builds{\"compiler\":\"$c\",\"variant\":\"$b\"},"
+              tested="$tested{\"compiler\":\"$c\",\"variant\":\"$v\"},"
+            done
           done
-          echo "gcc_toolchains=[$tcs]" >> "$GITHUB_OUTPUT"
+          echo "comps=$comps" >> "$GITHUB_OUTPUT"
+          echo "gcc_toolchains=[${tcs%,}]" >> "$GITHUB_OUTPUT"
           echo "builds=[${builds%,}]" >> "$GITHUB_OUTPUT"
           echo "tested=[${tested%,}]" >> "$GITHUB_OUTPUT"
           echo "pgo=[${pgo%,}]" >> "$GITHUB_OUTPUT"
@@ -102,13 +131,15 @@ jobs:
 
       - name: Download llvm-mingw and giflib once (the nightly asset is replaced daily)
         env:
-          STABLE: ${{ inputs.stable || startsWith(github.ref, 'refs/tags/natives-') }}   # tags: full set
+          COMPS: ${{ steps.r.outputs.comps }}
         run: |
           set -euo pipefail
           mkdir -p tc deps
-          curl -fsSL --retry 5 -o tc/llvm-mingw-clang-nightly.tar.xz \
-            https://github.com/mstorsjo/llvm-mingw/releases/download/nightly/llvm-mingw-nightly-ucrt-ubuntu-22.04-x86_64.tar.xz
-          if [ "$STABLE" = "true" ]; then
+          if [[ " $COMPS " == *" clang-nightly "* ]]; then
+            curl -fsSL --retry 5 -o tc/llvm-mingw-clang-nightly.tar.xz \
+              https://github.com/mstorsjo/llvm-mingw/releases/download/nightly/llvm-mingw-nightly-ucrt-ubuntu-22.04-x86_64.tar.xz
+          fi
+          if [[ " $COMPS " == *" clang23 "* ]]; then
             curl -fsSL --retry 5 -o tc/llvm-mingw-clang23.tar.xz \
               https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_STABLE/llvm-mingw-$LLVM_MINGW_STABLE-ucrt-ubuntu-22.04-x86_64.tar.xz
           fi
@@ -127,6 +158,7 @@ jobs:
           path: tc/
           retention-days: 3
           compression-level: 0
+          if-no-files-found: ignore   # GCC-only selection
 
       - uses: actions/upload-artifact@v4
         with:
@@ -137,6 +169,7 @@ jobs:
   gcc-toolchain:
     name: GCC cross toolchain (${{ matrix.tc.ver }})
     needs: resolve
+    if: ${{ needs.resolve.outputs.gcc_toolchains != '[]' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     strategy:
@@ -211,7 +244,7 @@ jobs:
   pgo-train:
     name: PGO training ${{ matrix.compiler }}
     needs: [resolve, build]
-    if: ${{ !cancelled() }}   # independent of the other matrix builds
+    if: ${{ !cancelled() && needs.resolve.outputs.pgo != '[]' }}   # independent of the other builds
     runs-on: windows-latest
     timeout-minutes: 45
     strategy:
@@ -263,7 +296,7 @@ jobs:
   pgo-use:
     name: build ${{ matrix.compiler }}-avx2-lto-pgo
     needs: [resolve, gcc-toolchain, pgo-train]
-    if: ${{ !cancelled() }}   # independent of the other matrix builds
+    if: ${{ !cancelled() && needs.resolve.outputs.pgo != '[]' }}   # independent of the other builds
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -373,7 +406,7 @@ jobs:
   bench:
     name: benchmark (all builds, one runner)
     needs: [resolve, build, pgo-use]
-    if: ${{ !cancelled() }}   # benchmark whatever built
+    if: ${{ !cancelled() && format('{0}', inputs.bench) != 'false' }}   # unset (push) = run
     runs-on: windows-latest
     timeout-minutes: 240
     steps:
@@ -416,56 +449,3 @@ jobs:
           path: |
             bench-results/
             !bench-results/corpus/*.rawi
-
-  release:
-    name: release (fastest tested build)
-    needs: [build, pgo-use, test, bench]
-    if: ${{ !cancelled() && needs.bench.result == 'success' && (startsWith(github.ref, 'refs/tags/natives-') || inputs.release) }}
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: a
-
-      - name: Assemble the release
-        id: asm
-        run: |
-          set -euo pipefail
-          mkdir rel
-          BEST=""
-          for b in $(jq -r '.ranking[].build' a/bench-results/ranking.json); do
-            if [ -d "a/ok-$b" ]; then
-              cp "a/bin-$b/webp4j-windows-x64.dll" "rel/webp4j-windows-x64-$b.dll"
-              cp "a/bin-$b/info.txt" "rel/info-$b.txt"
-              [ -n "$BEST" ] || BEST=$b
-            fi
-          done
-          test -n "$BEST" || { echo "::error::no build passed both tests and benchmark"; exit 1; }
-          cp "a/bin-$BEST/webp4j-windows-x64.dll" rel/webp4j-windows-x64.dll
-          cp a/bench-results/summary.md rel/benchmark.md
-          cp a/bench-results/results.json rel/benchmark.json
-          (cd rel && sha256sum * > SHA256SUMS)
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then TAG=${GITHUB_REF#refs/tags/}
-          else TAG="natives-win-x64-$(date -u +%Y%m%d)-${GITHUB_SHA::7}"; fi
-          {
-            echo "Windows x64 webp4j JNI library (drop-in for \`dev.matrixlab.webp4j:webp4j-core\` $WEBP4J_REF), libwebp \`${GITHUB_SHA::7}\`."
-            echo
-            echo "**\`webp4j-windows-x64.dll\` = \`$BEST\`**, the fastest build that passed webp4j's JUnit suite:"
-            echo '```'; cat "a/bin-$BEST/info.txt"; echo '```'
-            echo "\`avx2*\` builds need an AVX2/FMA/BMI2 CPU (Intel Haswell / AMD Zen 1 or newer) and UCRT (Windows 10+)."
-            echo "Development compilers (GCC trunk snapshot, LLVM main): hobby/experimental builds."
-            echo
-            cat a/bench-results/summary.md
-          } > notes.md
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          ls -l rel
-
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.asm.outputs.tag }}
-        run: |
-          gh release create "$TAG" rel/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
-            --title "webp4j natives Windows x64 ($TAG)" --notes-file notes.md

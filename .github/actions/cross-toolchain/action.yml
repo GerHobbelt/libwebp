@@ -5,17 +5,23 @@ description: >
   ./webp4j with libwebp/ -> ./libwebp, giflib sources at ./deps/giflib, JDK, Ninja).
 inputs:
   compiler:
-    description: 'matrix compiler name: gcc17, gcc16, clang-nightly, clang23'
+    description: 'compiler name: gcc17, gcc16, clang-nightly, clang23 (llvm-mingw also targets ARM64)'
     required: true
   toolchains:
     description: 'gcc_toolchains JSON of the resolve job (holds the cache keys)'
-    required: true
+    default: '[]'
+  deps-artifact:
+    description: 'artifact with giflib/ (unpacked to ./deps)'
+    default: deps
+  tc-artifact:
+    description: 'artifact with llvm-mingw-<compiler>.tar.xz'
+    default: tc-llvm-mingw
 runs:
   using: composite
   steps:
     - uses: actions/download-artifact@v4
       with:
-        name: deps
+        name: ${{ inputs.deps-artifact }}
         path: deps
 
     - name: Set up JDK (jni.h)
@@ -48,7 +54,7 @@ runs:
       if: startsWith(inputs.compiler, 'clang')
       uses: actions/download-artifact@v4
       with:
-        name: tc-llvm-mingw
+        name: ${{ inputs.tc-artifact }}
         path: ${{ runner.temp }}/tc-dl
 
     - name: Put the toolchain on PATH, point webp4j/libwebp to this repository
