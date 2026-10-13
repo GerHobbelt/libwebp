@@ -37,7 +37,8 @@ case $CC_KIND in
     # webp_bench does not exercise (animation, GIF, JNI glue) optimized normally instead of for size.
     gcc)   CC=$T-gcc;   CXX=$T-g++;     AR=$T-gcc-ar; RANLIB=$T-gcc-ranlib; LTO=-flto=auto
            PGEN="-fprofile-generate=$PGO_DIR -fprofile-prefix-path=$B"
-           PUSE="-fprofile-use=$PGO_DIR -fprofile-prefix-path=$B -fprofile-partial-training -Wno-missing-profile" ;;
+           PUSE="-fprofile-use=$PGO_DIR -fprofile-prefix-path=$B -fprofile-partial-training -Wno-missing-profile"
+           PUSE="$PUSE -Wno-error=coverage-mismatch" ;;   # a stale function profile is dropped, not fatal
     clang) CC=$T-clang; CXX=$T-clang++; AR=$T-ar;     RANLIB=$T-ranlib;     LTO=-flto
            PGEN="-fprofile-generate"   # the training run sets LLVM_PROFILE_FILE
            PUSE="-fprofile-use=$PGO_DIR/webp.profdata -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date" ;;
@@ -57,7 +58,10 @@ esac
 # __int64; the Linux one makes jlong a 'long', which is 32-bit on Windows). FindJNI's library variables
 # are satisfied with the kernel32 import library: webp4j links ${JNI_LIBRARIES} but uses nothing from
 # jvm/jawt.
-rm -rf "$WORK" && mkdir -p "$WORK/jni/include/win32" "$WORK/superbuild"
+# The superbuild copy lives at ONE path for all variants: PGO profiles are tied to source paths
+# (GCC: coverage-mismatch, Clang: names of static functions), so pgogen and pgo must see the same one.
+SUPER=$(dirname "$OUT")/superbuild-src
+rm -rf "$WORK" "$SUPER" && mkdir -p "$WORK/jni/include/win32" "$SUPER"
 cp "$JAVA_HOME/include/jni.h" "$WORK/jni/include/"
 cat > "$WORK/jni/include/win32/jni_md.h" <<'EOF'
 #ifndef _JAVASOFT_JNI_MD_H_
@@ -71,7 +75,7 @@ typedef signed char jbyte;
 #endif
 EOF
 # out-of-tree copy: webp4j's CMakeLists creates ${CMAKE_SOURCE_DIR}/src/main/resources/native
-cp "$HERE/CMakeLists.txt" "$HERE/webp_bench.c" "$WORK/superbuild/"
+cp "$HERE/CMakeLists.txt" "$HERE/webp_bench.c" "$SUPER/"
 tool() {  # absolute path of a PATH tool (Windows form when run from MSYS2 bash)
     local p; p=$(command -v "$1") || { echo "$1 not found" >&2; return 1; }
     if command -v cygpath > /dev/null; then cygpath -m "$p"; else echo "$p"; fi
@@ -81,7 +85,7 @@ KERNEL32=$($CC -print-file-name=libkernel32.a)   # the target's own (llvm-mingw 
 [ -f "$KERNEL32" ] || { echo "libkernel32.a not found" >&2; exit 1; }
 
 echo "::group::configure + build ($CC_KIND $VARIANT)"
-cmake -S "$WORK/superbuild" -B "$B" -G Ninja \
+cmake -S "$SUPER" -B "$B" -G Ninja \
     -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 \
     -DCMAKE_C_COMPILER=$CC -DCMAKE_CXX_COMPILER=$CXX -DCMAKE_RC_COMPILER=$T-windres \
     -DCMAKE_AR="$(tool $AR)" -DCMAKE_RANLIB="$(tool $RANLIB)" \
