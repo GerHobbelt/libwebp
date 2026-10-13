@@ -1,0 +1,395 @@
+name: Windows x64 natives (GCC snapshot vs Clang nightly) - build, test, benchmark, release
+
+# Builds the webp4j JNI library webp4j-windows-x64.dll (drop-in for dev.matrixlab.webp4j:webp4j-core,
+# libwebp = this repository) and webp_bench.exe with development compilers and picks the fastest:
+#   gcc17          GCC 17 trunk weekly snapshot (gcc.gnu.org/pub/gcc/snapshots/LATEST-17); no Windows
+#                  distribution ships it, so a Linux-hosted x86_64-w64-mingw32 cross toolchain is built
+#                  (ci/compiler-bench/build-gcc-mingw-cross.sh: UCRT, mingw-w64 master) and cached
+#   clang-nightly  llvm-mingw nightly (LLVM main, UCRT, lld) - github.com/mstorsjo/llvm-mingw
+#   (input 'stable': also GCC 16.2 cross + llvm-mingw release with Clang 23 as references)
+# each in three variants (ci/compiler-bench/build-variant.sh):
+#   base      webp4j's release defaults (-O3, generic x86-64, libwebp's run-time SSE2/SSE4.1/AVX2 dispatch)
+#   avx2      -O3 -march=x86-64-v3 -ffast-math         (needs an AVX2/FMA/BMI2 CPU: Haswell / Zen 1+)
+#   avx2-lto  avx2 + whole-program LTO
+# Builds are cross-compiled on Linux; every DLL then runs webp4j's JUnit suite on a native Windows x64
+# JVM, and all builds are benchmarked on ONE Windows runner in interleaved rounds
+# (ci/compiler-bench/bench.py; results in the job summary + artifact).
+# Release: push a tag 'natives-*' or run the workflow with 'release' checked -> GitHub (pre)release with
+# the fastest tested DLL as webp4j-windows-x64.dll plus every tested build and the benchmark report.
+on:
+  workflow_dispatch:
+    inputs:
+      gcc_snapshot:
+        description: 'GCC 17 snapshot (gcc-17-YYYYMMDD); empty = latest'
+        default: ''
+      stable:
+        description: 'Also build stable GCC 16.2 + Clang 23 as references'
+        type: boolean
+        default: false
+      rounds:
+        description: 'Benchmark rounds (interleaved)'
+        default: '5'
+      release:
+        description: 'Publish a GitHub release with the results'
+        type: boolean
+        default: false
+  push:
+    branches: ['compiler-bench']
+    tags: ['natives-*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: natives-windows-x64-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BINUTILS_VER: '2.47'
+  MINGW_VER: '63ebe6cdb3ec4d5c586b7f0f0c03dd502e44c296'   # mingw-w64 master (v14.0.0 CRT fails with GCC 17)
+  GCC_STABLE: 'gcc-16.2.0'
+  LLVM_MINGW_STABLE: '20261006'                            # LLVM 23.1.3
+  WEBP4J_REF: 'v2.5.0'
+  GIFLIB_REF: '5.2.2'
+
+jobs:
+  resolve:
+    name: resolve compiler versions + sources
+    runs-on: ubuntu-24.04
+    outputs:
+      gcc_toolchains: ${{ steps.r.outputs.gcc_toolchains }}
+      builds: ${{ steps.r.outputs.builds }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: r
+        name: Pick the GCC snapshot and the build matrix
+        env:
+          SNAP: ${{ inputs.gcc_snapshot }}
+          STABLE: ${{ inputs.stable }}
+          RECIPE: ${{ hashFiles('ci/compiler-bench/build-gcc-mingw-cross.sh') }}
+        run: |
+          set -euo pipefail
+          if [ -z "$SNAP" ]; then
+            SNAP=$(curl -fsSL --retry 5 https://gcc.gnu.org/pub/gcc/snapshots/LATEST-17/ | grep -oE 'gcc-17-[0-9]{8}' | head -1)
+          fi
+          test -n "$SNAP"
+          tc() {  # name version url -> JSON (the cache key is shared by the toolchain and build jobs)
+            echo "{\"name\":\"$1\",\"ver\":\"$2\",\"url\":\"$3\",\"key\":\"mingw-cross-$2-binutils$BINUTILS_VER-$MINGW_VER-$RECIPE\"}"
+          }
+          tcs=$(tc gcc17 "$SNAP" "https://gcc.gnu.org/pub/gcc/snapshots/${SNAP#gcc-}/$SNAP.tar.xz")
+          comps="gcc17 clang-nightly"
+          if [ "$STABLE" = "true" ]; then
+            tcs="$tcs,$(tc gcc16 "$GCC_STABLE" "https://gcc.gnu.org/pub/gcc/releases/$GCC_STABLE/$GCC_STABLE.tar.xz")"
+            comps="$comps gcc16 clang23"
+          fi
+          builds=""
+          for c in $comps; do for v in base avx2 avx2-lto; do
+            builds="$builds{\"compiler\":\"$c\",\"variant\":\"$v\"},"
+          done; done
+          echo "gcc_toolchains=[$tcs]" >> "$GITHUB_OUTPUT"
+          echo "builds=[${builds%,}]" >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+      - name: Download llvm-mingw and giflib once (the nightly asset is replaced daily)
+        env:
+          STABLE: ${{ inputs.stable }}
+        run: |
+          set -euo pipefail
+          mkdir -p tc deps
+          curl -fsSL --retry 5 -o tc/llvm-mingw-clang-nightly.tar.xz \
+            https://github.com/mstorsjo/llvm-mingw/releases/download/nightly/llvm-mingw-nightly-ucrt-ubuntu-22.04-x86_64.tar.xz
+          if [ "$STABLE" = "true" ]; then
+            curl -fsSL --retry 5 -o tc/llvm-mingw-clang23.tar.xz \
+              https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_STABLE/llvm-mingw-$LLVM_MINGW_STABLE-ucrt-ubuntu-22.04-x86_64.tar.xz
+          fi
+          for i in 1 2 3 4; do
+            git clone -q --depth 1 --branch "$GIFLIB_REF" https://git.code.sf.net/p/giflib/code deps/giflib && break
+            rm -rf deps/giflib; sleep 30
+          done
+          test -f deps/giflib/gif_lib.h
+          git -C deps/giflib log -1 --format='giflib %H %ci'
+          rm -rf deps/giflib/.git
+          ls -l tc
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tc-llvm-mingw
+          path: tc/
+          retention-days: 3
+          compression-level: 0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deps
+          path: deps/
+          retention-days: 3
+
+  gcc-toolchain:
+    name: GCC cross toolchain (${{ matrix.tc.ver }})
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      matrix:
+        tc: ${{ fromJSON(needs.resolve.outputs.gcc_toolchains) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/tc/mingw-${{ matrix.tc.name }}
+          key: ${{ matrix.tc.key }}
+
+      - name: Build the cross toolchain
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bison flex texinfo libgmp-dev libmpfr-dev libmpc-dev libisl-dev
+          WORK="$RUNNER_TEMP/gcc-work" bash ci/compiler-bench/build-gcc-mingw-cross.sh \
+            "${{ matrix.tc.url }}" ~/tc/mingw-${{ matrix.tc.name }}
+
+      - name: Toolchain info
+        run: |
+          ~/tc/mingw-${{ matrix.tc.name }}/bin/x86_64-w64-mingw32-gcc -v 2>&1 | tail -3
+          du -sh ~/tc/mingw-${{ matrix.tc.name }}
+
+  build:
+    name: build ${{ matrix.compiler }}-${{ matrix.variant }}
+    needs: [resolve, gcc-toolchain]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve.outputs.builds) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: libwebp
+
+      - name: Check out webp4j ${{ env.WEBP4J_REF }} (JNI glue + CMakeLists; its libwebp/ -> this repository)
+        uses: actions/checkout@v4
+        with:
+          repository: MrNanko/webp4j
+          ref: ${{ env.WEBP4J_REF }}
+          path: webp4j
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: deps
+          path: deps
+
+      - name: Set up JDK (jni.h)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v6
+
+      - name: GCC toolchain cache key
+        id: key
+        if: startsWith(matrix.compiler, 'gcc')
+        env:
+          TOOLCHAINS: ${{ needs.resolve.outputs.gcc_toolchains }}
+        run: echo "key=$(echo "$TOOLCHAINS" | jq -r '.[] | select(.name == "${{ matrix.compiler }}") | .key')" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the GCC cross toolchain
+        if: startsWith(matrix.compiler, 'gcc')
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/tc/mingw-${{ matrix.compiler }}
+          key: ${{ steps.key.outputs.key }}
+          fail-on-cache-miss: true
+
+      - name: Get llvm-mingw
+        if: startsWith(matrix.compiler, 'clang')
+        uses: actions/download-artifact@v4
+        with:
+          name: tc-llvm-mingw
+          path: ${{ runner.temp }}/tc-dl
+
+      - name: Put the toolchain on PATH
+        run: |
+          set -euo pipefail
+          case "${{ matrix.compiler }}" in
+            gcc*)   echo ~/tc/mingw-${{ matrix.compiler }}/bin >> "$GITHUB_PATH" ;;
+            clang*) mkdir -p ~/tc/llvm-mingw
+                    tar -xJf "$RUNNER_TEMP/tc-dl/llvm-mingw-${{ matrix.compiler }}.tar.xz" -C ~/tc/llvm-mingw --strip-components=1
+                    echo ~/tc/llvm-mingw/bin >> "$GITHUB_PATH" ;;
+          esac
+
+      - name: Cross-build webp4j-windows-x64.dll + webp_bench.exe
+        env:
+          WEBP4J_SRC: ${{ github.workspace }}/webp4j
+          GIFLIB_SRC: ${{ github.workspace }}/deps/giflib
+        run: |
+          set -euo pipefail
+          rm -rf webp4j/libwebp && ln -s "$GITHUB_WORKSPACE/libwebp" webp4j/libwebp
+          bash libwebp/ci/compiler-bench/build-variant.sh "${{ startsWith(matrix.compiler, 'gcc') && 'gcc' || 'clang' }}" \
+            ${{ matrix.variant }} dist/${{ matrix.compiler }}-${{ matrix.variant }}
+          cut -c1-400 dist/*/compile-cmds.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.compiler }}-${{ matrix.variant }}
+          path: dist/${{ matrix.compiler }}-${{ matrix.variant }}/
+
+  test:
+    name: test ${{ matrix.compiler }}-${{ matrix.variant }}
+    needs: [resolve, build]
+    if: ${{ !cancelled() }}   # test whatever built (a failed build's test fails at its artifact download)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.resolve.outputs.builds) }}
+    steps:
+      - name: Check out webp4j ${{ env.WEBP4J_REF }} (tests)
+        uses: actions/checkout@v4
+        with:
+          repository: MrNanko/webp4j
+          ref: ${{ env.WEBP4J_REF }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          architecture: x64
+          cache: maven
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-${{ matrix.compiler }}-${{ matrix.variant }}
+          path: xbuild
+
+      - name: Run webp4j's JUnit suite against the cross-built DLL
+        shell: bash
+        run: |
+          set -eux
+          cat xbuild/info.txt
+          mkdir -p src/main/resources/native
+          test -z "$(ls -A src/main/resources/native)"   # nothing else that could be loaded instead
+          cp xbuild/webp4j-windows-x64.dll src/main/resources/native/
+          mvn -B -ntp test
+
+      - name: Mark the build as tested
+        shell: bash
+        run: mkdir ok && cp xbuild/info.txt ok/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ok-${{ matrix.compiler }}-${{ matrix.variant }}
+          path: ok/
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: surefire-${{ matrix.compiler }}-${{ matrix.variant }}
+          path: target/surefire-reports/
+
+  bench:
+    name: benchmark (all builds, one runner)
+    needs: [resolve, build]
+    if: ${{ !cancelled() }}   # benchmark whatever built
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out webp4j ${{ env.WEBP4J_REF }} (test images)
+        uses: actions/checkout@v4
+        with:
+          repository: MrNanko/webp4j
+          ref: ${{ env.WEBP4J_REF }}
+          path: webp4j
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: dist
+
+      - name: Benchmark
+        shell: bash
+        env:
+          ROUNDS: ${{ inputs.rounds || '5' }}
+        run: |
+          set -euo pipefail
+          for d in dist/bin-*; do mv "$d" "dist/${d#dist/bin-}"; done
+          for d in dist/*/; do echo "== $d"; cat "$d/info.txt"; done
+          python -m pip install --quiet pillow
+          # corpus: webp4j's test photos (RGB 3.2 MP, RGBA 1 MP) + up to 2 Windows wallpapers (photos)
+          IMAGES="webp4j/src/test/resources/test_rgb.png webp4j/src/test/resources/test_rgba.png"
+          IMAGES="$IMAGES $(find /c/Windows/Web -iname '*.jpg' -size +300k 2>/dev/null | sort | head -2 | tr '\n' ' ')"
+          python ci/compiler-bench/bench.py --builds-dir dist --images $IMAGES --rounds "$ROUNDS" \
+            --min-time 0.5 --baseline gcc17-base --out bench-results
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results
+          path: |
+            bench-results/
+            !bench-results/corpus/*.rawi
+
+  release:
+    name: release (fastest tested build)
+    needs: [build, test, bench]
+    if: ${{ !cancelled() && needs.bench.result == 'success' && (startsWith(github.ref, 'refs/tags/natives-') || inputs.release) }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: a
+
+      - name: Assemble the release
+        id: asm
+        run: |
+          set -euo pipefail
+          mkdir rel
+          BEST=""
+          for b in $(jq -r '.ranking[].build' a/bench-results/ranking.json); do
+            if [ -d "a/ok-$b" ]; then
+              cp "a/bin-$b/webp4j-windows-x64.dll" "rel/webp4j-windows-x64-$b.dll"
+              cp "a/bin-$b/info.txt" "rel/info-$b.txt"
+              [ -n "$BEST" ] || BEST=$b
+            fi
+          done
+          test -n "$BEST" || { echo "::error::no build passed both tests and benchmark"; exit 1; }
+          cp "a/bin-$BEST/webp4j-windows-x64.dll" rel/webp4j-windows-x64.dll
+          cp a/bench-results/summary.md rel/benchmark.md
+          cp a/bench-results/results.json rel/benchmark.json
+          (cd rel && sha256sum * > SHA256SUMS)
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then TAG=${GITHUB_REF#refs/tags/}
+          else TAG="natives-win-x64-$(date -u +%Y%m%d)-${GITHUB_SHA::7}"; fi
+          {
+            echo "Windows x64 webp4j JNI library (drop-in for \`dev.matrixlab.webp4j:webp4j-core\` $WEBP4J_REF), libwebp \`${GITHUB_SHA::7}\`."
+            echo
+            echo "**\`webp4j-windows-x64.dll\` = \`$BEST\`**, the fastest build that passed webp4j's JUnit suite:"
+            echo '```'; cat "a/bin-$BEST/info.txt"; echo '```'
+            echo "\`avx2*\` builds need an AVX2/FMA/BMI2 CPU (Intel Haswell / AMD Zen 1 or newer) and UCRT (Windows 10+)."
+            echo "Development compilers (GCC trunk snapshot, LLVM main): hobby/experimental builds."
+            echo
+            cat a/bench-results/summary.md
+          } > notes.md
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          ls -l rel
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.asm.outputs.tag }}
+        run: |
+          gh release create "$TAG" rel/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "webp4j natives Windows x64 ($TAG)" --notes-file notes.md
