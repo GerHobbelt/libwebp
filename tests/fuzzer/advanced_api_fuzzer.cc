@@ -32,6 +32,31 @@
 
 namespace {
 
+void CompareDecBuffers(const WebPDecBuffer& a, const WebPDecBuffer& b) {
+  ASSERT_EQ(a.colorspace, b.colorspace);
+  ASSERT_EQ(a.width, b.width);
+  ASSERT_EQ(a.height, b.height);
+  if (WebPIsRGBMode(a.colorspace)) {
+    ASSERT_EQ(a.u.RGBA.size, b.u.RGBA.size);
+    ASSERT_NE(a.u.RGBA.rgba, nullptr);
+    ASSERT_EQ(a.u.RGBA.rgba != nullptr, b.u.RGBA.rgba != nullptr);
+    EXPECT_EQ(std::memcmp(a.u.RGBA.rgba, b.u.RGBA.rgba, a.u.RGBA.size), 0);
+  } else {
+    ASSERT_EQ(a.u.YUVA.y_size, b.u.YUVA.y_size);
+    ASSERT_EQ(a.u.YUVA.u_size, b.u.YUVA.u_size);
+    ASSERT_EQ(a.u.YUVA.v_size, b.u.YUVA.v_size);
+    EXPECT_EQ(std::memcmp(a.u.YUVA.y, b.u.YUVA.y, a.u.YUVA.y_size), 0);
+    EXPECT_EQ(std::memcmp(a.u.YUVA.u, b.u.YUVA.u, a.u.YUVA.u_size), 0);
+    EXPECT_EQ(std::memcmp(a.u.YUVA.v, b.u.YUVA.v, a.u.YUVA.v_size), 0);
+    if (a.u.YUVA.a != nullptr || b.u.YUVA.a != nullptr) {
+      ASSERT_NE(a.u.YUVA.a, nullptr);
+      ASSERT_NE(b.u.YUVA.a, nullptr);
+      ASSERT_EQ(a.u.YUVA.a_size, b.u.YUVA.a_size);
+      EXPECT_EQ(std::memcmp(a.u.YUVA.a, b.u.YUVA.a, a.u.YUVA.a_size), 0);
+    }
+  }
+}
+
 void AdvancedApiTest(std::string_view blob, uint8_t factor_u8, int colorspace,
                      bool incremental,
                      const fuzz_utils::WebPDecoderOptionsCpp& decoder_options) {
@@ -53,10 +78,16 @@ void AdvancedApiTest(std::string_view blob, uint8_t factor_u8, int colorspace,
 
   std::memcpy(&config.options, &decoder_options, sizeof(decoder_options));
   if (config.options.use_cropping) {
-    config.options.crop_width = (int)(config.input.width * (1 - factor));
-    config.options.crop_height = (int)(config.input.height * (1 - factor));
-    config.options.crop_left = config.input.width - config.options.crop_width;
-    config.options.crop_top = config.input.height - config.options.crop_height;
+    config.options.crop_width =
+        std::max(1, (int)(config.input.width * (1 - factor)));
+    config.options.crop_height =
+        std::max(1, (int)(config.input.height * (1 - factor)));
+    config.options.crop_left =
+        decoder_options.crop_left %
+        (config.input.width - config.options.crop_width + 1);
+    config.options.crop_top =
+        decoder_options.crop_top %
+        (config.input.height - config.options.crop_height + 1);
   }
   if (config.options.use_scaling) {
     config.options.scaled_width = (int)(config.input.width * factor * 2);
@@ -142,7 +173,27 @@ void AdvancedApiTest(std::string_view blob, uint8_t factor_u8, int colorspace,
           new_size *= 2;
         }
       }
+      int left, top, width, height, last_y, stride, uv_stride, a_stride;
+      uint8_t *u, *v, *a;
+      (void)WebPIDecodedArea(idec, &left, &top, &width, &height);
+      (void)WebPIDecGetRGB(idec, &last_y, &width, &height, &stride);
+      (void)WebPIDecGetYUVA(idec, &last_y, &u, &v, &a, &width, &height, &stride,
+                            &uv_stride, &a_stride);
       WebPIDelete(idec);
+      // Verify that incremental decoding produces the same output as one-shot
+      // WebPDecode() when both succeed.
+      if (status == VP8_STATUS_OK) {
+        WebPDecoderConfig ref_config;
+        if (WebPInitDecoderConfig(&ref_config)) {
+          ref_config.options = config.options;
+          ref_config.output.colorspace = config.output.colorspace;
+          const VP8StatusCode ref_status = WebPDecode(data, size, &ref_config);
+          if (ref_status == VP8_STATUS_OK) {
+            CompareDecBuffers(config.output, ref_config.output);
+          }
+          WebPFreeDecBuffer(&ref_config.output);
+        }
+      }
     } else {
       (void)WebPDecode(data, size, &config);
     }
@@ -316,6 +367,71 @@ TEST(AdvancedApi, IncrementalExternalYUVABufferReplacementWithScaling) {
   }
 
   WebPIDelete(idec);
+  WebPFree(encoded);
+}
+
+// Incremental lossy decoding must stop at the last macroblock row needed by
+// the crop window, like WebPDecode() does. It used to decode (and loop-filter)
+// all the rows below it, reading never-written filter cache rows.
+TEST(AdvancedApi, IncrementalCropStopsAtCropBottom) {
+  constexpr int kWidth = 64;
+  constexpr int kHeight = 256;
+  constexpr int kCropHeight = 8;  // Only the first macroblock row is needed.
+
+  std::vector<uint8_t> rgb(kWidth * kHeight * 3);
+  for (int y = 0; y < kHeight; ++y) {
+    for (int x = 0; x < kWidth; ++x) {
+      const size_t i = 3u * (y * kWidth + x);
+      rgb[i + 0] = static_cast<uint8_t>(x * 13 + y * 7 + (x ^ y));
+      rgb[i + 1] = static_cast<uint8_t>(x * 3 + y * 17);
+      rgb[i + 2] = static_cast<uint8_t>((x ^ (y * 5)) + x * 11);
+    }
+  }
+  uint8_t* encoded = nullptr;
+  const size_t encoded_size =
+      WebPEncodeRGB(rgb.data(), kWidth, kHeight, kWidth * 3, 75.f, &encoded);
+  ASSERT_NE(encoded, nullptr);
+  ASSERT_GT(encoded_size, 0u);
+
+  WebPDecoderConfig ref_config, config;
+  ASSERT_TRUE(WebPInitDecoderConfig(&ref_config));
+  ref_config.output.colorspace = MODE_RGBA;
+  ref_config.options.use_cropping = 1;
+  ref_config.options.crop_left = 0;
+  ref_config.options.crop_top = 0;
+  ref_config.options.crop_width = kWidth;
+  ref_config.options.crop_height = kCropHeight;
+  config = ref_config;
+  ASSERT_EQ(WebPDecode(encoded, encoded_size, &ref_config), VP8_STATUS_OK);
+
+  WebPIDecoder* const idec = WebPIDecode(nullptr, 0, &config);
+  ASSERT_NE(idec, nullptr);
+  size_t offset = 0;
+  VP8StatusCode status = VP8_STATUS_SUSPENDED;
+  while (offset < encoded_size && status == VP8_STATUS_SUSPENDED) {
+    const size_t chunk = std::min<size_t>(64, encoded_size - offset);
+    status = WebPIAppend(idec, encoded + offset, chunk);
+    offset += chunk;
+  }
+  ASSERT_EQ(status, VP8_STATUS_OK);
+  // The rows below the crop window come last in the bitstream and must not be
+  // waited for.
+  EXPECT_LT(offset, encoded_size / 2);
+
+  ASSERT_EQ(config.output.width, kWidth);
+  ASSERT_EQ(config.output.height, kCropHeight);
+  for (int y = 0; y < kCropHeight; ++y) {
+    EXPECT_EQ(
+        std::memcmp(
+            config.output.u.RGBA.rgba + y * config.output.u.RGBA.stride,
+            ref_config.output.u.RGBA.rgba + y * ref_config.output.u.RGBA.stride,
+            kWidth * 4),
+        0);
+  }
+
+  WebPIDelete(idec);
+  WebPFreeDecBuffer(&config.output);
+  WebPFreeDecBuffer(&ref_config.output);
   WebPFree(encoded);
 }
 

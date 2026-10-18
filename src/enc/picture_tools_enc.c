@@ -92,6 +92,7 @@ void WebPReplaceTransparentPixels(WebPPicture* const pic, uint32_t color) {
   if (pic != NULL && pic->use_argb) {
     int y = pic->height;
     uint32_t* argb = pic->argb;
+    if (!WebPValidateAllocatedPicture(pic)) return;
     color &= 0xffffffu;  // force alpha=0
     WebPInitAlphaProcessing();
     while (y-- > 0) {
@@ -103,7 +104,7 @@ void WebPReplaceTransparentPixels(WebPPicture* const pic, uint32_t color) {
 
 void WebPCleanupTransparentArea(WebPPicture* pic) {
   int x, y, w, h;
-  if (pic == NULL) return;
+  if (!WebPValidateAllocatedPicture(pic)) return;
   w = pic->width / SIZE;
   h = pic->height / SIZE;
 
@@ -136,9 +137,7 @@ void WebPCleanupTransparentArea(WebPPicture* pic) {
     uint8_t* v_ptr = pic->v;
     const uint8_t* a_ptr = pic->a;
     int values[3] = {0};
-    if (a_ptr == NULL || y_ptr == NULL || u_ptr == NULL || v_ptr == NULL) {
-      return;
-    }
+    if (a_ptr == NULL) return;
     for (y = 0; y + SIZE <= height; y += SIZE) {
       int need_reset = 1;
       for (x = 0; x + SIZE <= width; x += SIZE) {
@@ -200,7 +199,7 @@ void WebPBlendAlpha(WebPPicture* picture, uint32_t background_rgb) {
   const int green = (background_rgb >> 8) & 0xff;
   const int blue = (background_rgb >> 0) & 0xff;
   int x, y;
-  if (picture == NULL) return;
+  if (!WebPValidateAllocatedPicture(picture)) return;
   if (!picture->use_argb) {
     // omit last pixel during u/v loop
     const int uv_width = (picture->width >> 1);
@@ -213,7 +212,7 @@ void WebPBlendAlpha(WebPPicture* picture, uint32_t background_rgb) {
     uint8_t* u_ptr = picture->u;
     uint8_t* v_ptr = picture->v;
     uint8_t* a_ptr = picture->a;
-    if (!has_alpha || a_ptr == NULL) return;  // nothing to do
+    if (!has_alpha) return;  // nothing to do
     for (y = 0; y < picture->height; ++y) {
       // Luma blending
       for (x = 0; x < picture->width; ++x) {

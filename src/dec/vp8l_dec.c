@@ -485,14 +485,17 @@ int ReadHuffmanCodesHelper(int color_cache_bits, int num_htree_groups,
   int* code_lengths = NULL;
   int total_huffman_table_size;
 
+  *htree_groups = NULL;
   if ((mapping == NULL && num_htree_groups != num_htree_groups_max) ||
       num_htree_groups > num_htree_groups_max) {
+    VP8LSetError(dec, VP8_STATUS_BITSTREAM_ERROR);
     goto Error;
   }
   // Each Huffman group has 5 trees, each requiring at least 4 bits in the
   // bitstream (20 bits per group).
   if ((uint64_t)(dec->br.len - dec->br.pos) * 8 + VP8L_LBITS <
       (uint64_t)num_htree_groups_max * 20) {
+    VP8LSetError(dec, VP8_STATUS_BITSTREAM_ERROR);
     goto Error;
   }
 
@@ -772,11 +775,12 @@ static int EmitRescaledRowsYUVA(const VP8LDecoder* const dec, uint8_t* in,
 }
 
 // Returns true if alpha[] has non-0xff values.
+// alpha is assumed to be stored as 32-bit RGBA.
 static int CheckNonOpaque(const uint8_t* alpha, int width, int height,
                           int y_step) {
   WebPInitAlphaProcessing();
   for (; height-- > 0; alpha += y_step) {
-    if (WebPHasAlpha8b(alpha, width)) return 1;
+    if (WebPHasAlpha32b(alpha, width)) return 1;
   }
   return 0;
 }
