@@ -71,6 +71,15 @@ WEBP_EXTERN void WebPSafeFree(void* const ptr);
 #define WEBP_ALIGN(PTR) \
   (((uintptr_t)(PTR) + WEBP_ALIGN_CST) & ~(uintptr_t)WEBP_ALIGN_CST)
 
+// Returns true if 'PTR' is aligned to the boundary required by 'TYPE', and
+// false if sizeof(TYPE) is not a power of 2.
+// Note: 'TYPE' should be a primitive scalar or pointer type whose alignment
+// requirement equals its size. Avoid passing aggregate struct types to this
+// macro as sizeof(TYPE) may not equal its alignment requirement.
+#define WEBP_IS_ALIGNED(PTR, TYPE)             \
+  ((sizeof(TYPE) & (sizeof(TYPE) - 1)) == 0 && \
+   ((uintptr_t)(PTR) & (sizeof(TYPE) - 1)) == 0)
+
 #include <string.h>
 // memcpy() is the safe way of moving potentially unaligned 32b memory.
 static WEBP_INLINE uint32_t WebPMemToUint32(const uint8_t* const ptr) {
@@ -185,6 +194,17 @@ static WEBP_INLINE int BitsCtz(uint32_t n) {
 // Pixel copying.
 
 struct WebPPicture;
+
+// Returns 1 if |stride| >= step * width, 0 otherwise.
+WEBP_NODISCARD static WEBP_INLINE int CheckStride(int stride, int step,
+                                                  int width) {
+  uint64_t min_stride, abs_stride;
+  if (width <= 0 || step <= 0) return 0;
+  min_stride = (uint64_t)step * (uint64_t)width;
+  // Do not use abs(stride) as abs(INT_MIN) is undefined behavior.
+  abs_stride = (stride < 0) ? (uint64_t)-(int64_t)stride : (uint64_t)stride;
+  return (abs_stride >= min_stride);
+}
 
 // Copy width x height pixels from 'src' to 'dst' honoring the strides.
 WEBP_EXTERN void WebPCopyPlane(const uint8_t* src, int src_stride, uint8_t* dst,

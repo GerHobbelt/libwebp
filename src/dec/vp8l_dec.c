@@ -439,12 +439,6 @@ WEBP_NODISCARD static int ReadHuffmanCodes(VP8LDecoder* const dec, int xsize,
         if (*mapped_group == -1) *mapped_group = num_htree_groups++;
         huffman_image[i] = *mapped_group;
       }
-      if (num_htree_groups == num_htree_groups_max) {
-        // No remapping is needed.
-        WebPSafeFree(mapping);
-        mapping = NULL;
-        num_htree_groups = num_htree_groups_max;
-      }
     } else {
       num_htree_groups = num_htree_groups_max;
     }
@@ -613,33 +607,37 @@ WEBP_NODISCARD static int AllocateAndInitRescaler(VP8LDecoder* const dec,
   const int out_width = io->scaled_width;
   const int in_height = io->mb_h;
   const int out_height = io->scaled_height;
-  const uint64_t work_size = 2 * num_channels * (uint64_t)out_width;
+  const uint64_t work_size_bytes = WebPRescalerWorkSize(
+      in_width, in_height, out_width, out_height, num_channels);
   rescaler_t* WEBP_BIDI_INDEXABLE work;  // Rescaler work area.
   const uint64_t scaled_data_size = (uint64_t)out_width;
-  uint32_t* WEBP_BIDI_INDEXABLE
-      scaled_data;  // Temporary storage for scaled BGRA data.
-  const uint64_t memory_size = sizeof(*dec->rescaler) +
-                               work_size * sizeof(*work) +
-                               scaled_data_size * sizeof(*scaled_data);
-  uint8_t* WEBP_BIDI_INDEXABLE memory =
-      (uint8_t*)WebPSafeMalloc(memory_size, sizeof(*memory));
-  if (memory == NULL) {
+  // Temporary storage for scaled BGRA data.
+  uint32_t* WEBP_BIDI_INDEXABLE scaled_data =
+      (uint32_t*)WebPSafeMalloc(scaled_data_size, sizeof(*scaled_data));
+  uint8_t* WEBP_BIDI_INDEXABLE memory = (uint8_t*)WebPSafeMalloc(
+      work_size_bytes + WEBP_ALIGN_CST, sizeof(*memory));
+  WebPRescaler* rescaler =
+      (WebPRescaler*)WebPSafeMalloc(1ULL, sizeof(*rescaler));
+  if (rescaler == NULL || memory == NULL || scaled_data == NULL) {
+    WebPSafeFree(rescaler);
+    WebPSafeFree(memory);
+    WebPSafeFree(scaled_data);
     return VP8LSetError(dec, VP8_STATUS_OUT_OF_MEMORY);
   }
+  assert(dec->rescaler == NULL);
   assert(dec->rescaler_memory == NULL);
-  dec->rescaler_memory = memory;
 
-  dec->rescaler = (WebPRescaler*)memory;
-  memory += sizeof(*dec->rescaler);
-  work = (rescaler_t*)memory;
-  memory += work_size * sizeof(*work);
-  scaled_data = (uint32_t*)memory;
-
-  if (!WebPRescalerInit(dec->rescaler, in_width, in_height,
-                        (uint8_t*)scaled_data, out_width, out_height, 0,
-                        num_channels, work)) {
-    return 0;
+  work = WEBP_UNSAFE_FORGE_BIDI_INDEXABLE(rescaler_t*, WEBP_ALIGN(memory),
+                                          work_size_bytes);
+  if (!WebPRescalerInit(rescaler, in_width, in_height, (uint8_t*)scaled_data,
+                        out_width, out_height, 0, num_channels, work)) {
+    WebPSafeFree(rescaler);
+    WebPSafeFree(memory);
+    WebPSafeFree(scaled_data);
+    return VP8LSetError(dec, VP8_STATUS_INVALID_PARAM);
   }
+  dec->rescaler = rescaler;
+  dec->rescaler_memory = memory;
   return 1;
 }
 #endif  // WEBP_REDUCE_SIZE
@@ -656,6 +654,7 @@ static int Export(WebPRescaler* const rescaler, WEBP_CSP_MODE colorspace,
   uint8_t* dst = rgba;
   const int dst_width = rescaler->dst_width;
   int num_lines_out = 0;
+  assert(WEBP_IS_ALIGNED(src, uint32_t));
   while (WebPRescalerHasPendingOutput(rescaler)) {
     WebPRescalerExportRow(rescaler);
     WebPMultARGBRow(src, dst_width, 1);
@@ -700,6 +699,7 @@ static int EmitRows(WEBP_CSP_MODE colorspace, const uint8_t* row_in,
   int lines = mb_h;
   uint8_t* row_out = out;
   while (lines-- > 0) {
+    assert(WEBP_IS_ALIGNED(row_in, uint32_t));
     VP8LConvertFromBGRA((const uint32_t*)row_in, mb_w, colorspace, row_out);
     row_in += in_stride;
     row_out += out_stride;
@@ -741,6 +741,7 @@ static int ExportYUVA(const VP8LDecoder* const dec, int y_pos) {
   uint32_t* const src = (uint32_t*)rescaler->dst;
   const int dst_width = rescaler->dst_width;
   int num_lines_out = 0;
+  assert(WEBP_IS_ALIGNED(src, uint32_t));
   while (WebPRescalerHasPendingOutput(rescaler)) {
     WebPRescalerExportRow(rescaler);
     WebPMultARGBRow(src, dst_width, 1);
@@ -865,7 +866,7 @@ WEBP_NODISCARD static int SetCropWindow(VP8Io* const io, int y_start, int y_end,
   }
   if (y_start >= y_end) return 0;  // Crop window is empty.
 
-  *in_data += io->crop_left * sizeof(uint32_t);
+  *in_data += (ptrdiff_t)io->crop_left * sizeof(uint32_t);
 
   io->mb_y = y_start - io->crop_top;
   io->mb_w = io->crop_right - io->crop_left;
@@ -1038,26 +1039,24 @@ static void AlphaApplyFilter(ALPHDecoder* const alph_dec, int first_row,
 }
 
 static void ExtractPalettedAlphaRows(VP8LDecoder* const dec, int last_row) {
-  // For vertical and gradient filtering, we need to decode the part above the
-  // crop_top row, in order to have the correct spatial predictors.
+  // For horizontal, vertical and gradient filtering, we need to decode the part
+  // above the crop_top row, in order to have the correct spatial predictors.
   ALPHDecoder* const alph_dec = (ALPHDecoder*)dec->io->opaque;
-  const int top_row = (alph_dec->filter == WEBP_FILTER_NONE ||
-                       alph_dec->filter == WEBP_FILTER_HORIZONTAL)
-                          ? dec->io->crop_top
-                          : dec->last_row;
+  const int top_row = (alph_dec->filter == WEBP_FILTER_NONE) ? dec->io->crop_top
+                                                             : dec->last_row;
   const int first_row = (dec->last_row < top_row) ? top_row : dec->last_row;
   assert(last_row <= dec->io->crop_bottom);
+  WebPShiftAlphaWindow(alph_dec, dec->last_out_row, last_row);
   if (last_row > first_row) {
     // Special method for paletted alpha data. We only process the cropped area.
     const int width = dec->io->width;
-    uint8_t* out;
+    uint8_t* const out =
+        alph_dec->output + GetAlphaWindowRowOffset(alph_dec, first_row);
     const uint8_t* const in =
         (uint8_t*)dec->pixels + GetWindowRowOffset(dec, first_row);
     VP8LTransform* const transform = &dec->transforms[0];
     assert(dec->next_transform == 1);
     assert(transform->type == COLOR_INDEXING_TRANSFORM);
-    WebPShiftAlphaWindow(alph_dec, dec->last_out_row, last_row);
-    out = alph_dec->output + GetAlphaWindowRowOffset(alph_dec, first_row);
     VP8LColorIndexInverseTransformAlpha(transform, first_row, last_row, in,
                                         out);
     AlphaApplyFilter(alph_dec, first_row, last_row, out, width);
@@ -1083,7 +1082,7 @@ static WEBP_INLINE void CopySmallPattern8b(const uint8_t* src, uint8_t* dst,
                                            int length, uint32_t pattern) {
   int i;
   // align 'dst' to 4-bytes boundary. Adjust the pattern along the way.
-  while ((uintptr_t)dst & 3) {
+  while (!WEBP_IS_ALIGNED(dst, uint32_t)) {
     *dst++ = *src++;
     pattern = Rotate8b(pattern);
     --length;
@@ -1151,12 +1150,12 @@ Copy:
 static WEBP_INLINE void CopySmallPattern32b(const uint32_t* src, uint32_t* dst,
                                             int length, uint64_t pattern) {
   int i;
-  if ((uintptr_t)dst & 4) {  // Align 'dst' to 8-bytes boundary.
+  if (!WEBP_IS_ALIGNED(dst, uint64_t)) {  // Align 'dst' to 8-bytes boundary.
     *dst++ = *src++;
     pattern = (pattern >> 32) | (pattern << 32);
     --length;
   }
-  assert(0 == ((uintptr_t)dst & 7));
+  assert(WEBP_IS_ALIGNED(dst, uint64_t));
   for (i = 0; i < (length >> 1); ++i) {
     ((uint64_t*)dst)[i] = pattern;  // Copy the pattern 8 bytes at a time.
   }
@@ -1168,7 +1167,7 @@ static WEBP_INLINE void CopySmallPattern32b(const uint32_t* src, uint32_t* dst,
 static WEBP_INLINE void CopyBlock32b(uint32_t* const dst, int dist,
                                      int length) {
   const uint32_t* const src = dst - dist;
-  if (dist <= 2 && length >= 4 && ((uintptr_t)dst & 3) == 0) {
+  if (dist <= 2 && length >= 4 && WEBP_IS_ALIGNED(dst, uint32_t)) {
     uint64_t pattern;
     if (dist == 1) {
       pattern = (uint64_t)src[0];
@@ -1728,6 +1727,11 @@ static void VP8LClear(VP8LDecoder* const dec) {
   dec->next_transform = 0;
   dec->transforms_seen = 0;
 
+  if (dec->rescaler != NULL) {
+    WebPSafeFree(dec->rescaler->dst);
+    WebPSafeFree(dec->rescaler);
+    dec->rescaler = NULL;
+  }
   WebPSafeFree(dec->rescaler_memory);
   dec->rescaler_memory = NULL;
 

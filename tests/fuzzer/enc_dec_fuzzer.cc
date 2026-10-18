@@ -20,10 +20,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <vector>
 
 #include "./fuzz_utils.h"
+#include "gtest/gtest.h"
 #include "src/dsp/cpu.h"
 #include "src/utils/rescaler_utils.h"
+#include "src/utils/utils.h"
 #include "webp/decode.h"
 #include "webp/encode.h"
 
@@ -74,6 +77,8 @@ void Enc(const fuzz_utils::CropOrScaleParams& crop_or_scale_params,
   }
 }
 
+// Encodes a picture and decodes it using valid colorspace and decoder options,
+// verifying that decoding succeeds and produces consistent output.
 void EncDecValidTest(bool use_argb, fuzz_utils::WebPPictureCpp pic_cpp,
                      WebPConfig config, int optimization_index,
                      const fuzz_utils::CropOrScaleParams& crop_or_scale_params,
@@ -91,7 +96,7 @@ void EncDecValidTest(bool use_argb, fuzz_utils::WebPPictureCpp pic_cpp,
 
   Enc(crop_or_scale_params, config, pic, memory_writer);
 
-  // Try decoding the result.
+  // Try decoding the result without options into BGRA first.
   const uint8_t* const out_data = memory_writer.mem;
   const size_t out_size = memory_writer.size;
   WebPDecoderConfig dec_config;
@@ -139,7 +144,8 @@ void EncDecValidTest(bool use_argb, fuzz_utils::WebPPictureCpp pic_cpp,
     }
   }
 
-  // Use given decoding options.
+  // Use given decoding options. Skip if the crop rectangle exceeds the image
+  // dimensions (which would validly fail with VP8_STATUS_INVALID_PARAM).
   if (static_cast<int64_t>(decoder_options.crop_left) +
               decoder_options.crop_width >
           static_cast<int64_t>(pic.width) ||
@@ -148,19 +154,87 @@ void EncDecValidTest(bool use_argb, fuzz_utils::WebPPictureCpp pic_cpp,
           static_cast<int64_t>(pic.height)) {
     return;
   }
-  WebPFreeDecBuffer(&dec_config.output);
-  if (!WebPInitDecoderConfig(&dec_config)) {
+  // Decode into a separate config so the uncropped BGRA output in dec_config
+  // remains available for comparison below.
+  WebPDecoderConfig cropped_dec_config;
+  std::unique_ptr<WebPDecoderConfig, fuzz_utils::UniquePtrDeleter>
+      cropped_dec_config_owner(&cropped_dec_config);
+  if (!WebPInitDecoderConfig(&cropped_dec_config)) {
     fprintf(stderr, "WebPInitDecoderConfig failed.\n");
     abort();
   }
 
-  dec_config.output.colorspace = static_cast<WEBP_CSP_MODE>(colorspace);
-  std::memcpy(&dec_config.options, &decoder_options, sizeof(decoder_options));
-  status = WebPDecode(out_data, out_size, &dec_config);
-  if (status != VP8_STATUS_OK && status != VP8_STATUS_OUT_OF_MEMORY &&
-      status != VP8_STATUS_USER_ABORT) {
-    fprintf(stderr, "WebPDecode failed. status: %d.\n", status);
+  cropped_dec_config.output.colorspace = static_cast<WEBP_CSP_MODE>(colorspace);
+  std::memcpy(&cropped_dec_config.options, &decoder_options,
+              sizeof(decoder_options));
+  const VP8StatusCode cropped_status =
+      WebPDecode(out_data, out_size, &cropped_dec_config);
+  if (cropped_status != VP8_STATUS_OK &&
+      cropped_status != VP8_STATUS_OUT_OF_MEMORY &&
+      cropped_status != VP8_STATUS_USER_ABORT) {
+    fprintf(stderr, "WebPDecode failed. status: %d.\n", cropped_status);
     abort();
+  }
+
+  // Verify that for all 8-bit alpha colorspaces, decoding with decoder_options
+  // produces the exact same alpha values as the corresponding cropped (and
+  // optionally flipped) sub-rect of the uncropped decode when scaling and alpha
+  // dithering are disabled. RGB/YUV values are not compared because on lossy
+  // images they can be affected by decoder_options (e.g. bypass_filtering,
+  // no_fancy_upsampling, dithering_strength, or fancy YUV upsampling at crop
+  // boundaries) and by premultiplication.
+  if (status == VP8_STATUS_OK && cropped_status == VP8_STATUS_OK &&
+      !decoder_options.use_scaling &&
+      decoder_options.alpha_dithering_strength == 0 &&
+      (colorspace == MODE_RGBA || colorspace == MODE_BGRA ||
+       colorspace == MODE_ARGB || colorspace == MODE_rgbA ||
+       colorspace == MODE_bgrA || colorspace == MODE_Argb ||
+       colorspace == MODE_YUVA)) {
+    // Lossy decoding snaps crop_left and crop_top to even coordinates.
+    const int crop_left =
+        decoder_options.use_cropping
+            ? (config.lossless ? decoder_options.crop_left
+                               : (decoder_options.crop_left & ~1))
+            : 0;
+    const int crop_top =
+        decoder_options.use_cropping
+            ? (config.lossless ? decoder_options.crop_top
+                               : (decoder_options.crop_top & ~1))
+            : 0;
+    const int cw = cropped_dec_config.output.width;
+    const int ch = cropped_dec_config.output.height;
+    const uint8_t* const uncropped_bgra = dec_config.output.u.RGBA.rgba;
+    const int uncropped_stride = dec_config.output.u.RGBA.stride;
+    for (int y = 0; y < ch; ++y) {
+      const int src_y = crop_top + (decoder_options.flip ? (ch - 1 - y) : y);
+      const uint8_t* const src_row =
+          uncropped_bgra + static_cast<ptrdiff_t>(src_y) * uncropped_stride;
+      for (int x = 0; x < cw; ++x) {
+        const uint8_t expected_a = src_row[4 * (crop_left + x) + 3];
+        uint8_t actual_a = 0;
+        if (colorspace == MODE_YUVA) {
+          actual_a = cropped_dec_config.output.u.YUVA
+                         .a[static_cast<ptrdiff_t>(y) *
+                                cropped_dec_config.output.u.YUVA.a_stride +
+                            x];
+        } else {
+          // Alpha is at byte offset 0 for MODE_ARGB/MODE_Argb and 3 for
+          // MODE_RGBA/MODE_rgbA/MODE_BGRA/MODE_bgrA.
+          const int alpha_offset =
+              (colorspace == MODE_ARGB || colorspace == MODE_Argb) ? 0 : 3;
+          actual_a = cropped_dec_config.output.u.RGBA
+                         .rgba[static_cast<ptrdiff_t>(y) *
+                                   cropped_dec_config.output.u.RGBA.stride +
+                               4 * x + alpha_offset];
+        }
+        if (actual_a != expected_a) {
+          fprintf(stderr,
+                  "Cropped alpha mismatch at (%d, %d): got %u, expected %u.\n",
+                  x, y, actual_a, expected_a);
+          std::abort();
+        }
+      }
+    }
   }
 }
 
@@ -216,6 +290,54 @@ void EncDecTest(bool use_argb, fuzz_utils::WebPPictureCpp pic_cpp,
   }
 }
 
+TEST(EncIndexDec, Buganizer498966814) {
+  const bool use_argb = false;
+  WebPPicture pic = fuzz_utils::GetSourcePicture(/*index=*/2, use_argb);
+  EncDecTest(false,
+             fuzz_utils::WebPPictureCpp{
+                 use_argb, pic.colorspace, pic.width, pic.height, pic.y, pic.u,
+                 pic.v, pic.y_stride, pic.uv_stride, pic.a, pic.a_stride,
+                 pic.argb, pic.argb_stride, pic.memory_, pic.memory_argb_},
+             WebPConfig{1,  78.f, 6,  static_cast<WebPImageHint>(3),
+                        0,  0.f,  3,  93,
+                        34, 3,    0,  1,
+                        0,  0,    79, 3,
+                        1,  0,    0,  30,
+                        1,  0,    1,  80,
+                        0,  0,    1,  0,
+                        100},
+             1, fuzz_utils::CropOrScaleParams{true, true, 2, 1, 6, 3}, 9,
+             fuzz_utils::WebPDecoderOptionsCpp{1044690037,
+                                               -814076429,
+                                               0,
+                                               503925603,
+                                               -129135778,
+                                               1416295626,
+                                               0,
+                                               488395839,
+                                               524288,
+                                               1,
+                                               1573917569,
+                                               487414467,
+                                               1639447831,
+                                               1696032481,
+                                               {0, 0, 0, 0, 0}});
+}
+
+TEST(RescalerUtils, Needs64BitExtremeDownscale) {
+  // 16383x16383 -> 1x1: a huge number of source rows (16383) accumulate into
+  // a single output row, each contributing up to 255 * src_width. Overflows
+  // a 32-bit accumulator; see WebPRescalerNeeds64Bit().
+  EXPECT_TRUE(WebPRescalerNeeds64Bit(16383, 16383, 1, 1));
+}
+
+TEST(RescalerUtils, Needs64BitExtremeUpscale) {
+  // 64x128 -> 524288x1: horizontal upscale makes each row contribute up to
+  // 255 * (dst_width - 1), and 128 rows accumulate into the single output
+  // row (dst_height == 1). Also overflows a 32-bit accumulator.
+  EXPECT_TRUE(WebPRescalerNeeds64Bit(64, 128, 524288, 1));
+}
+
 }  // namespace
 
 FUZZ_TEST(EncIndexDec, EncDecValidTest)
@@ -261,3 +383,46 @@ FUZZ_TEST(EncArbitraryDec, EncDecTest)
                  fuzz_utils::ArbitraryCropOrScaleParams(),
                  /*colorspace=*/fuzztest::Arbitrary<int>(),
                  fuzz_utils::ArbitraryWebPDecoderOptions());
+
+// WebPPictureImportRGBA() documents no alignment requirement for 'rgba' or
+// 'rgba_stride', so the input must not be read through a uint32_t*.
+TEST(Enc, ImportRGBAUnalignedInput) {
+  constexpr int kWidth = 37;  // More than 16 pixels, to also hit SIMD loops.
+  constexpr int kHeight = 4;
+  for (int offset = 0; offset < 4; ++offset) {
+    for (int pad = 0; pad < 4; ++pad) {
+      const int stride = 4 * kWidth + pad;
+      // Exactly-sized buffer, so that out-of-bounds reads are detected.
+      std::vector<uint8_t> buf(offset + stride * (kHeight - 1) + 4 * kWidth);
+      for (size_t i = 0; i < buf.size(); ++i) {
+        buf[i] = static_cast<uint8_t>(i * 37 + 11);
+      }
+      const uint8_t* const rgba = buf.data() + offset;
+      WebPPicture pic;
+      ASSERT_TRUE(WebPPictureInit(&pic));
+      pic.use_argb = 1;
+      pic.width = kWidth;
+      pic.height = kHeight;
+      // On failure pic.argb is left null: free the picture and skip the
+      // pixel comparison below.
+      const bool imported = WebPPictureImportRGBA(&pic, rgba, stride);
+      EXPECT_TRUE(imported);
+      if (!imported) {
+        WebPPictureFree(&pic);
+        continue;
+      }
+      for (int y = 0; y < kHeight; ++y) {
+        for (int x = 0; x < kWidth; ++x) {
+          const uint8_t* const p = rgba + y * stride + 4 * x;
+          const uint32_t expected = (uint32_t{p[3]} << 24) |
+                                    (uint32_t{p[0]} << 16) |
+                                    (uint32_t{p[1]} << 8) | uint32_t{p[2]};
+          EXPECT_EQ(pic.argb[y * pic.argb_stride + x], expected)
+              << "offset=" << offset << " pad=" << pad << " x=" << x
+              << " y=" << y;
+        }
+      }
+      WebPPictureFree(&pic);
+    }
+  }
+}
