@@ -75,7 +75,7 @@ int WebPImportRGB565(const uint8_t* rgb565, WebPPicture* pic) {
 #endif
       uint32_t r = rg & 0xf8;
       uint32_t g = ((rg << 5) | (gb >> 3)) & 0xfc;
-      uint32_t b = (gb << 5);
+      uint32_t b = (gb << 3) & 0xf8;
       // dithering
       r = r | (r >> 5);
       g = g | (g >> 6);
@@ -107,9 +107,9 @@ int WebPImportRGB4444(const uint8_t* rgb4444, WebPPicture* pic) {
       const uint32_t ba = rgb4444[2 * x + 1];
 #endif
       uint32_t r = rg & 0xf0;
-      uint32_t g = (rg << 4);
-      uint32_t b = (ba & 0xf0);
-      uint32_t a = (ba << 4);
+      uint32_t g = (rg << 4) & 0xf0;
+      uint32_t b = ba & 0xf0;
+      uint32_t a = (ba << 4) & 0xf0;
       // dithering
       r = r | (r >> 4);
       g = g | (g >> 4);
@@ -444,7 +444,7 @@ static int SharpYuvEstimate420RiskImpl(const void* r_ptr, const void* g_ptr,
                                        int full_scan, float* score) {
   if (width < 1 || height < 1 || width == INT_MAX || height == INT_MAX ||
       r_ptr == NULL || g_ptr == NULL || b_ptr == NULL || options == NULL ||
-      score == NULL) {
+      options->yuv_matrix == NULL || score == NULL) {
     return 0;
   }
   if (rgb_bit_depth != 8) {

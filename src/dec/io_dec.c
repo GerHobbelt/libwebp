@@ -307,7 +307,8 @@ static int EmitRescaledAlphaYUV(const VP8Io* const io, WebPDecParams* const p,
   return 0;
 }
 
-static int InitYUVRescaler(const VP8Io* const io, WebPDecParams* const p) {
+WEBP_NODISCARD static int InitYUVRescaler(const VP8Io* const io,
+                                          WebPDecParams* const p) {
   const int has_alpha = WebPIsAlphaMode(p->output->colorspace);
   const WebPYUVABuffer* const buf = &p->output->u.YUVA;
   const int out_width = io->scaled_width;
@@ -491,17 +492,20 @@ static int EmitRescaledAlphaRGB(const VP8Io* const io, WebPDecParams* const p,
     WebPRescaler* const scaler = p->scaler_a;
     int lines_left = expected_num_out_lines;
     const int y_end = p->last_y + lines_left;
-    while (lines_left > 0) {
-      const int64_t row_offset = (ptrdiff_t)scaler->src_y - io->mb_y;
-      WebPRescalerImport(scaler, io->mb_h + io->mb_y - scaler->src_y,
-                         io->a + row_offset * io->width, io->width);
+    int j = 0;
+    assert(scaler->src_y == io->mb_y);
+    while (j < io->mb_h) {
+      j += WebPRescalerImport(scaler, io->mb_h - j,
+                              io->a + (ptrdiff_t)j * io->width, io->width);
       lines_left -= p->emit_alpha_row(p, y_end - lines_left, lines_left);
     }
+    assert(lines_left == 0);
   }
   return 0;
 }
 
-static int InitRGBRescaler(const VP8Io* const io, WebPDecParams* const p) {
+WEBP_NODISCARD static int InitRGBRescaler(const VP8Io* const io,
+                                          WebPDecParams* const p) {
   const int has_alpha = WebPIsAlphaMode(p->output->colorspace);
   const int out_width = io->scaled_width;
   const int out_height = io->scaled_height;
@@ -575,7 +579,7 @@ static int InitRGBRescaler(const VP8Io* const io, WebPDecParams* const p) {
 //------------------------------------------------------------------------------
 // Default custom functions
 
-static int CustomSetup(VP8Io* io) {
+WEBP_NODISCARD static int CustomSetup(VP8Io* io) {
   WebPDecParams* const p = (WebPDecParams*)io->opaque;
   const WEBP_CSP_MODE colorspace = p->output->colorspace;
   const int is_rgb = WebPIsRGBMode(colorspace);
@@ -643,7 +647,7 @@ static int CustomSetup(VP8Io* io) {
 
 //------------------------------------------------------------------------------
 
-static int CustomPut(const VP8Io* io) {
+WEBP_NODISCARD static int CustomPut(const VP8Io* io) {
   WebPDecParams* const p = (WebPDecParams*)io->opaque;
   const int mb_w = io->mb_w;
   const int mb_h = io->mb_h;
