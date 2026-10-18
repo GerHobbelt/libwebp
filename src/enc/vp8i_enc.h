@@ -200,7 +200,7 @@ typedef struct {
   int min_disto;  // minimum distortion required to trigger filtering record
   // reactivities
   int lambda_i16, lambda_i4, lambda_uv;
-  int lambda_mode, lambda_trellis, tlambda;
+  int lambda_mode, tlambda;
   int lambda_trellis_i16, lambda_trellis_i4, lambda_trellis_uv;
 
   // lambda values for distortion-based evaluation
@@ -460,8 +460,8 @@ WEBP_NODISCARD int VP8EncTokenLoop(VP8Encoder* const enc);
 // in webpenc.c
 // Assign an error code to a picture. Return false for convenience.
 int WebPEncodingSetError(const WebPPicture* const pic, WebPEncodingError error);
-int WebPReportProgress(const WebPPicture* const pic, int percent,
-                       int* const percent_store);
+WEBP_NODISCARD int WebPReportProgress(const WebPPicture* const pic, int percent,
+                                      int* const percent_store);
 
 // in analysis.c
 // Main analysis loop. Decides the segmentations and complexity.
@@ -499,6 +499,16 @@ int VP8FilterStrengthFromDelta(int sharpness, int delta);
 // their valid ranges. If returning false, the 'error_code' in 'picture' is
 // updated.
 WEBP_NODISCARD int WebPValidatePicture(const WebPPicture* const picture);
+
+// Same as WebPValidatePicture, but additionally checks that the required plane
+// buffers (argb if use_argb, or y/u/v if !use_argb, as well as a if
+// colorspace has WEBP_CSP_ALPHA_BIT) are non-NULL.
+// If returning false, the 'error_code' in 'picture' is updated.
+// If use_argb is true, only the argb buffer is checked. If use_argb is false,
+// the y, u, and v buffers are checked, and a is checked if colorspace has
+// WEBP_CSP_ALPHA_BIT.
+WEBP_NODISCARD int WebPValidateAllocatedPicture(
+    const WebPPicture* const picture);
 
 // Remove reference to the ARGB/YUVA buffer (doesn't free anything).
 void WebPPictureResetBuffers(WebPPicture* const picture);
