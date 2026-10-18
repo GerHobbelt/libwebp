@@ -13,6 +13,7 @@
 
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "src/dec/alphai_dec.h"
 #include "src/dec/vp8_dec.h"
@@ -125,6 +126,52 @@ WEBP_NODISCARD static VP8StatusCode ALPHInit(ALPHDecoder* const dec,
   return status;
 }
 
+int WebPGetAlphaWindowRows(const VP8Decoder* const dec, const VP8Io* const io) {
+  const int width = io->width;
+  // Alpha rows are always decoded starting from row 0 (for spatial filtering
+  // and lossless stream dependencies) and decoding stops at io->crop_bottom
+  // (which equals io->height when cropping is not used).
+  const int height = io->crop_bottom;
+  if (dec->alpha_data == NULL) return 0;
+  // For each non-last macroblock row (16 pixel rows), FinishRow() in
+  // frame_dec.c holds back up to 8 bottom pixel rows (kFilterExtraRows[] for
+  // complex filtering) until the next macroblock row is decoded. On the last
+  // macroblock row, no bottom rows are held back, so FinishRow() requests the 8
+  // pixel rows held back from the previous macroblock row plus all 16 pixel
+  // rows of the last macroblock row (24 pixel rows total), while retaining 1
+  // preceding row (row - 1) for spatial unfiltering and fancy upsampling.
+  return (dec->alpha_dithering > 0)
+             ? height
+             : VP8LGetWindowRows(width, height, /*max_history_rows=*/25);
+}
+
+void WebPShiftAlphaWindow(ALPHDecoder* const alph_dec, int current_end_row,
+                          int last_row) {
+  const int width = alph_dec->width;
+  int min_keep_row = alph_dec->min_needed_row;
+  ptrdiff_t shift_pixels;
+  if (last_row - alph_dec->output_start_row <= alph_dec->num_output_rows) {
+    return;
+  }
+  if (alph_dec->prev_line != NULL) {
+    const int prev_row =
+        alph_dec->output_start_row +
+        (int)((alph_dec->prev_line - alph_dec->output) / width);
+    if (prev_row < min_keep_row) min_keep_row = prev_row;
+  }
+  if (min_keep_row - alph_dec->output_start_row >= alph_dec->num_output_rows) {
+    alph_dec->output_start_row = min_keep_row;
+    return;
+  }
+  shift_pixels = VP8LShiftWindowBuffer(
+      alph_dec->output, width, sizeof(*alph_dec->output), min_keep_row,
+      GetAlphaWindowRowOffset(alph_dec, current_end_row),
+      &alph_dec->output_start_row);
+  if (shift_pixels > 0 && alph_dec->prev_line != NULL) {
+    alph_dec->prev_line -= shift_pixels;
+  }
+}
+
 // Decodes, unfilters and dequantizes *at least* 'num_rows' rows of alpha
 // starting from row number 'row'. It assumes that rows up to (row - 1) have
 // already been decoded.
@@ -134,11 +181,16 @@ WEBP_NODISCARD static int ALPHDecode(VP8Decoder* const dec, int row,
   ALPHDecoder* const alph_dec = dec->alph_dec;
   const int width = alph_dec->width;
   const int height = alph_dec->io.crop_bottom;
+  // Fancy chroma upsampling looks 1 row back into alpha (GetAlphaSourceRow).
+  alph_dec->min_needed_row = (row > 0) ? (row - 1) : 0;
   if (alph_dec->method == ALPHA_NO_COMPRESSION) {
     int y;
-    const uint8_t* prev_line = dec->alpha_prev_line;
+    const uint8_t* prev_line;
     const uint8_t* deltas = dec->alpha_data + ALPHA_HEADER_LEN + row * width;
-    uint8_t* dst = dec->alpha_plane + row * width;
+    uint8_t* dst;
+    WebPShiftAlphaWindow(alph_dec, row, row + num_rows);
+    prev_line = alph_dec->prev_line;
+    dst = dec->alpha_plane + GetAlphaWindowRowOffset(alph_dec, row);
     assert(deltas <= &dec->alpha_data[dec->alpha_data_size]);
     assert(WebPUnfilters[alph_dec->filter] != NULL);
     for (y = 0; y < num_rows; ++y) {
@@ -147,7 +199,7 @@ WEBP_NODISCARD static int ALPHDecode(VP8Decoder* const dec, int row,
       dst += width;
       deltas += width;
     }
-    dec->alpha_prev_line = prev_line;
+    alph_dec->prev_line = prev_line;
   } else {  // alph_dec->method == ALPHA_LOSSLESS_COMPRESSION
     assert(alph_dec->vp8l_dec != NULL);
     if (!VP8LDecodeAlphaImageStream(alph_dec, row + num_rows)) {
@@ -167,27 +219,8 @@ WEBP_NODISCARD static int ALPHDecode(VP8Decoder* const dec, int row,
   return 1;
 }
 
-WEBP_NODISCARD static int AllocateAlphaPlane(VP8Decoder* const dec,
-                                             const VP8Io* const io) {
-  const int stride = io->width;
-  const int height = io->crop_bottom;
-  const uint64_t alpha_size = (uint64_t)stride * height;
-  assert(dec->alpha_plane_mem == NULL);
-  dec->alpha_plane_mem =
-      (uint8_t*)WebPSafeMalloc(alpha_size, sizeof(*dec->alpha_plane));
-  if (dec->alpha_plane_mem == NULL) {
-    return VP8SetError(dec, VP8_STATUS_OUT_OF_MEMORY,
-                       "Alpha decoder initialization failed.");
-  }
-  dec->alpha_plane = dec->alpha_plane_mem;
-  dec->alpha_prev_line = NULL;
-  return 1;
-}
-
 void WebPDeallocateAlphaMemory(VP8Decoder* const dec) {
   assert(dec != NULL);
-  WebPSafeFree(dec->alpha_plane_mem);
-  dec->alpha_plane_mem = NULL;
   dec->alpha_plane = NULL;
   ALPHDelete(dec->alph_dec);
   dec->alph_dec = NULL;
@@ -201,6 +234,7 @@ WEBP_NODISCARD const uint8_t* VP8DecompressAlphaRows(VP8Decoder* const dec,
                                                      int row, int num_rows) {
   const int width = io->width;
   const int height = io->crop_bottom;
+  int start_row = 0;
 
   assert(dec != NULL && io != NULL);
 
@@ -210,13 +244,14 @@ WEBP_NODISCARD const uint8_t* VP8DecompressAlphaRows(VP8Decoder* const dec,
 
   if (!dec->is_alpha_decoded) {
     if (dec->alph_dec == NULL) {  // Initialize decoder.
+      assert(dec->alpha_plane != NULL);
       dec->alph_dec = ALPHNew();
       if (dec->alph_dec == NULL) {
         VP8SetError(dec, VP8_STATUS_OUT_OF_MEMORY,
                     "Alpha decoder initialization failed.");
         return NULL;
       }
-      if (!AllocateAlphaPlane(dec, io)) goto Error;
+      dec->alph_dec->num_output_rows = WebPGetAlphaWindowRows(dec, io);
       {
         const VP8StatusCode status =
             ALPHInit(dec->alph_dec, dec->alpha_data, dec->alpha_data_size, io,
@@ -226,10 +261,7 @@ WEBP_NODISCARD const uint8_t* VP8DecompressAlphaRows(VP8Decoder* const dec,
           goto Error;
         }
       }
-      // if we allowed use of alpha dithering, check whether it's needed at all
-      if (dec->alph_dec->pre_processing != ALPHA_PREPROCESSED_LEVELS) {
-        dec->alpha_dithering = 0;  // disable dithering
-      } else {
+      if (dec->alpha_dithering > 0) {
         num_rows = height - row;  // decode everything in one pass
       }
     }
@@ -237,6 +269,7 @@ WEBP_NODISCARD const uint8_t* VP8DecompressAlphaRows(VP8Decoder* const dec,
     assert(dec->alph_dec != NULL);
     assert(row + num_rows <= height);
     if (!ALPHDecode(dec, row, num_rows)) goto Error;
+    start_row = dec->alph_dec->output_start_row;
 
     if (dec->is_alpha_decoded) {  // finished?
       ALPHDelete(dec->alph_dec);
@@ -262,7 +295,7 @@ WEBP_NODISCARD const uint8_t* VP8DecompressAlphaRows(VP8Decoder* const dec,
   }
 
   // Return a pointer to the current decoded row.
-  return dec->alpha_plane + row * width;
+  return dec->alpha_plane + (ptrdiff_t)(row - start_row) * width;
 
 Error:
   WebPDeallocateAlphaMemory(dec);
